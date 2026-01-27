@@ -62,13 +62,18 @@ def _render_option_box(text: str, width: int, highlighted: bool = False) -> list
     """Render an option inside a rounded box."""
     inner_width = width - 4
     display_text = text[:inner_width].ljust(inner_width)
-    style = "bold cyan" if highlighted else ""
-    end_style = "/bold cyan" if highlighted else ""
+
+    if highlighted:
+        start = "[bold cyan]"
+        end = "[/bold cyan]"
+    else:
+        start = ""
+        end = ""
 
     return [
-        f"  [{style}]{BOX_TL}{BOX_H * (width - 4)}{BOX_TR}[{end_style}]  ",
-        f"  [{style}]{BOX_V} {display_text} {BOX_V}[{end_style}]  ",
-        f"  [{style}]{BOX_BL}{BOX_H * (width - 4)}{BOX_BR}[{end_style}]  ",
+        f"  {start}{BOX_TL}{BOX_H * (width - 4)}{BOX_TR}{end}  ",
+        f"  {start}{BOX_V} {display_text} {BOX_V}{end}  ",
+        f"  {start}{BOX_BL}{BOX_H * (width - 4)}{BOX_BR}{end}  ",
     ]
 
 
