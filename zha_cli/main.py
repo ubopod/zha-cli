@@ -53,20 +53,31 @@ class ZHACli:
 
     async def _coordinator_entry_flow(self) -> None:
         """Handle coordinator detection and selection on entry."""
+        previous_count = len(self._detected_coordinators)
+
         while self._running and not self._selected_coordinator:
             await self._detect_coordinators_with_spinner()
 
             if not self._detected_coordinators:
+                # Check if this was a retry that found nothing new
+                if previous_count == 0:
+                    title = "No Coordinators Found"
+                else:
+                    title = "No New Coordinators Found"
+
                 options = ["Retry detection"]
-                choice = ui.prompt_menu(
-                    "No Coordinators Found", options, show_home=True
-                )
-                if choice in (0, MENU_HOME):
+                choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
+                if choice in (0, MENU_BACK, MENU_HOME):
                     self._running = False
                     return
                 # choice == 1 means retry, loop continues
+                previous_count = 0
             else:
-                await self._select_coordinator_menu()
+                result = await self._select_coordinator_menu()
+                if result == "retry":
+                    previous_count = len(self._detected_coordinators)
+                    continue
+                break
 
     async def _detect_coordinators_with_spinner(self) -> None:
         """Detect coordinators with a loading spinner."""
@@ -78,41 +89,52 @@ class ZHACli:
                 ui.print_error(f"Error detecting coordinators: {exc}")
                 self._detected_coordinators = []
 
-    async def _select_coordinator_menu(self) -> None:
-        """Display coordinator selection menu."""
+    async def _select_coordinator_menu(self) -> str:
+        """Display coordinator selection menu.
+
+        Returns:
+            "selected" if a coordinator was selected
+            "retry" if retry detection was chosen
+            "exit" if user wants to exit
+        """
         ui.print_coordinators_table(self._detected_coordinators)
 
-        selected = False
         if len(self._detected_coordinators) == 1:
             options = [
                 f"Select {self._detected_coordinators[0].port}",
                 "Retry detection",
             ]
-            choice = ui.prompt_menu("Coordinator Found", options, show_home=True)
-            if choice in (0, MENU_HOME):
+            choice = ui.prompt_menu(
+                "Coordinator Found", options, show_back=True, show_home=True
+            )
+            if choice in (0, MENU_BACK, MENU_HOME):
                 self._running = False
+                return "exit"
             elif choice == 1:
                 self._selected_coordinator = self._detected_coordinators[0]
-                selected = True
-            # choice == 2 means retry, will loop back
+                await self._ensure_network_started()
+                return "selected"
+            else:
+                return "retry"
         else:
             # Multiple coordinators found - list each one
             options = []
             for coord in self._detected_coordinators:
                 options.append(f"Select {coord.port}")
             options.append("Retry detection")
-            choice = ui.prompt_menu("Coordinators Found", options, show_home=True)
+            choice = ui.prompt_menu(
+                "Coordinators Found", options, show_back=True, show_home=True
+            )
 
-            if choice in (0, MENU_HOME):
+            if choice in (0, MENU_BACK, MENU_HOME):
                 self._running = False
+                return "exit"
             elif 1 <= choice <= len(self._detected_coordinators):
                 self._selected_coordinator = self._detected_coordinators[choice - 1]
-                selected = True
-            # last option means retry
-
-        # After selection, ensure network is started
-        if selected and self._selected_coordinator:
-            await self._ensure_network_started()
+                await self._ensure_network_started()
+                return "selected"
+            else:
+                return "retry"
 
     async def _ensure_network_started(self) -> None:
         """Ensure the network is started, auto-starting if needed."""
@@ -182,14 +204,17 @@ class ZHACli:
         options.append("Pair new device")
         reset_idx = len(options)
         options.append("Reset network")
-        change_idx = len(options)
-        options.append("Change coordinator")
 
         title = f"Devices{coord_info}" if devices else f"No Devices{coord_info}"
-        choice = ui.prompt_menu(title, options, show_home=True)
+        choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
 
         if choice in (0, MENU_HOME):
             self._running = False
+        elif choice == MENU_BACK:
+            # Back goes to coordinator selection
+            await self._network_manager.shutdown()
+            self._selected_coordinator = None
+            await self._coordinator_entry_flow()
         elif devices and choice <= len(devices):
             # Device selected
             await self._control_device_direct(devices[choice - 1])
@@ -197,10 +222,6 @@ class ZHACli:
             await self._pair_device()
         elif choice == reset_idx + 1:
             await self._reset_network()
-        elif choice == change_idx + 1:
-            await self._network_manager.shutdown()
-            self._selected_coordinator = None
-            await self._coordinator_entry_flow()
 
     async def _reset_network(self) -> None:
         """Reset (shutdown) the network."""
@@ -216,7 +237,7 @@ class ZHACli:
 
     async def _pair_device(self) -> None:
         """Enable pairing mode to add new devices."""
-        options = ["Start pairing (60 seconds)", "Start pairing (120 seconds)"]
+        options = ["Start pairing (30 seconds)", "Start pairing (60 seconds)"]
         choice = ui.prompt_menu(
             "Device Pairing", options, show_back=True, show_home=True
         )
@@ -227,7 +248,7 @@ class ZHACli:
             self._running = False
             return
 
-        duration = 60 if choice == 1 else 120
+        duration = 30 if choice == 1 else 60
 
         ui.print_info(f"Enabling pairing mode for {duration} seconds...")
         ui.print_info("Put your Zigbee device in pairing mode now")
