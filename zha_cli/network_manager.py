@@ -159,6 +159,10 @@ class NetworkManager:
 
         # Delete the database file
         db_path = self.get_database_path(coord)
+        self._delete_database_file(db_path)
+
+    def _delete_database_file(self, db_path: Path) -> None:
+        """Delete a database file and its related SQLite files."""
         if db_path.exists():
             _LOGGER.info("Deleting network database: %s", db_path)
             db_path.unlink()
@@ -170,8 +174,23 @@ class NetworkManager:
                     related.unlink()
 
             _LOGGER.info("Network database deleted")
-        else:
-            _LOGGER.debug("No database to delete")
+
+    def delete_all_networks(self) -> int:
+        """Delete all saved network databases.
+
+        Returns:
+            Number of database files deleted.
+        """
+        deleted = 0
+        for db_file in self._data_dir.glob("zigbee_*.db"):
+            _LOGGER.info("Deleting: %s", db_file)
+            self._delete_database_file(db_file)
+            deleted += 1
+        return deleted
+
+    def get_saved_network_count(self) -> int:
+        """Get the number of saved network databases."""
+        return len(list(self._data_dir.glob("zigbee_*.db")))
 
     def get_devices(self) -> list[dict]:
         """Get all paired devices.

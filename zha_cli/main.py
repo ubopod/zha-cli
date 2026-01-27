@@ -65,11 +65,13 @@ class ZHACli:
                 else:
                     title = "No New Coordinators Found"
 
-                options = ["Retry detection"]
+                options = ["Retry detection", "Settings"]
                 choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
                 if choice in (0, MENU_BACK, MENU_HOME):
                     self._running = False
                     return
+                elif choice == 2:
+                    await self._settings_menu()
                 # choice == 1 means retry, loop continues
                 previous_count = 0
             else:
@@ -91,7 +93,7 @@ class ZHACli:
                     break
 
                 result = await self._select_coordinator_menu()
-                if result == "retry":
+                if result in ("retry", "settings"):
                     previous_count = len(self._detected_coordinators)
                     continue
                 break
@@ -124,7 +126,11 @@ class ZHACli:
                 options.append(f"[green]●[/green] {coord.port} (existing network)")
             else:
                 options.append(f"[dim]○[/dim] {coord.port} (new)")
+
+        retry_idx = len(options)
         options.append("Retry detection")
+        settings_idx = len(options)
+        options.append("Settings")
 
         title = (
             "Coordinator Found"
@@ -140,8 +146,52 @@ class ZHACli:
             self._selected_coordinator = self._detected_coordinators[choice - 1]
             await self._ensure_network_started()
             return "selected"
+        elif choice == retry_idx + 1:
+            return "retry"
+        elif choice == settings_idx + 1:
+            await self._settings_menu()
+            return "settings"
         else:
             return "retry"
+
+    async def _settings_menu(self) -> None:
+        """Display settings menu."""
+        saved_count = self._network_manager.get_saved_network_count()
+
+        options = [
+            f"Delete all saved networks ({saved_count} saved)",
+        ]
+
+        choice = ui.prompt_menu("Settings", options, show_back=True, show_home=True)
+
+        if choice in (0, MENU_BACK):
+            return
+        elif choice == MENU_HOME:
+            self._running = False
+            return
+        elif choice == 1:
+            await self._delete_all_networks()
+
+    async def _delete_all_networks(self) -> None:
+        """Delete all saved network databases."""
+        saved_count = self._network_manager.get_saved_network_count()
+        if saved_count == 0:
+            ui.print_warning("No saved networks to delete")
+            return
+
+        if not ui.prompt_confirm(
+            f"Delete ALL {saved_count} saved network(s)? This cannot be undone.",
+            default=False,
+        ):
+            return
+
+        # Shutdown current network if running
+        if self._network_manager.is_running:
+            await self._network_manager.shutdown()
+            self._pairing_manager = None
+
+        deleted = self._network_manager.delete_all_networks()
+        ui.print_success(f"Deleted {deleted} saved network(s)")
 
     async def _ensure_network_started(self) -> None:
         """Ensure the network is started, auto-starting if needed."""
