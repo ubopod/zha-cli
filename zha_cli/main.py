@@ -79,6 +79,7 @@ class ZHACli:
         """Display coordinator selection menu."""
         ui.print_coordinators_table(self._detected_coordinators)
 
+        selected = False
         if len(self._detected_coordinators) == 1:
             options = [
                 f"Select {self._detected_coordinators[0].port}",
@@ -90,7 +91,7 @@ class ZHACli:
                 self._running = False
             elif choice == 1:
                 self._selected_coordinator = self._detected_coordinators[0]
-                ui.print_success(f"Selected: {self._selected_coordinator.port}")
+                selected = True
             # choice == 2 means retry, will loop back
         else:
             # Multiple coordinators found
@@ -110,8 +111,44 @@ class ZHACli:
                     self._selected_coordinator = self._detected_coordinators[
                         coord_choice - 1
                     ]
-                    ui.print_success(f"Selected: {self._selected_coordinator.port}")
+                    selected = True
             # choice == 2 means retry
+
+        # After selection, ensure network is started
+        if selected and self._selected_coordinator:
+            await self._ensure_network_started()
+
+    async def _ensure_network_started(self) -> None:
+        """Ensure the network is started, auto-starting if needed."""
+        if self._network_manager.is_running:
+            ui.print_success("Network is already running")
+            devices = self._network_manager.get_devices()
+            ui.print_info(f"Found {len(devices)} paired device(s)")
+            return
+
+        coordinator = self._selected_coordinator
+        if coordinator is None:
+            return
+
+        ui.print_info(
+            f"Starting network with {coordinator.radio_type.pretty_name} "
+            f"at {coordinator.port}..."
+        )
+
+        with ui.spinner("Starting network...") as progress:
+            progress.add_task("Initializing Zigbee network...")
+            try:
+                gateway = await self._network_manager.start_network(coordinator)
+                self._pairing_manager = DevicePairingManager(gateway)
+            except Exception as exc:
+                ui.print_error(f"Failed to start network: {exc}")
+                _LOGGER.exception("Network start failed")
+                self._selected_coordinator = None
+                return
+
+        ui.print_success("Network started successfully!")
+        devices = self._network_manager.get_devices()
+        ui.print_info(f"Found {len(devices)} paired device(s)")
 
     def _signal_handler(self) -> None:
         """Handle shutdown signals."""
@@ -124,81 +161,56 @@ class ZHACli:
         ui.print_success("Goodbye!")
 
     async def _main_menu(self) -> None:
-        """Display and handle the main menu."""
+        """Display and handle the main menu (device management)."""
+        # If network isn't running (e.g., after a reset), go back to coordinator flow
+        if not self._network_manager.is_running:
+            self._selected_coordinator = None
+            await self._coordinator_entry_flow()
+            return
+
         coordinator = self._selected_coordinator
-        coord_info = f" ({coordinator.port})" if coordinator else ""
+        coord_info = f" - {coordinator.port}" if coordinator else ""
 
         options = [
-            f"Start network{coord_info}",
+            "Connected devices",
             "Pair device",
-            "List devices",
             "Control device",
+            "Reset network",
             "Change coordinator",
             "Exit",
         ]
 
-        if not self._network_manager.is_running:
-            options[1] = "Pair device (start network first)"
-            options[2] = "List devices (start network first)"
-            options[3] = "Control device (start network first)"
-
-        choice = ui.prompt_menu("Main Menu", options)
+        choice = ui.prompt_menu(f"Device Menu{coord_info}", options)
 
         if choice == 0:
             self._running = False
         elif choice == 1:
-            await self._start_network()
+            await self._list_devices()
         elif choice == 2:
             await self._pair_device()
         elif choice == 3:
-            await self._list_devices()
-        elif choice == 4:
             await self._control_device()
+        elif choice == 4:
+            await self._reset_network()
         elif choice == 5:
+            await self._network_manager.shutdown()
             self._selected_coordinator = None
             await self._coordinator_entry_flow()
         elif choice == 6:
             self._running = False
 
-    async def _start_network(self) -> None:
-        """Start the Zigbee network."""
-        if self._network_manager.is_running:
-            ui.print_warning("Network is already running")
-            if ui.prompt_confirm("Restart network?", default=False):
-                await self._network_manager.shutdown()
-            else:
-                return
-
-        coordinator = self._selected_coordinator
-        if coordinator is None:
-            ui.print_error("No coordinator selected")
+    async def _reset_network(self) -> None:
+        """Reset (shutdown) the network."""
+        if not ui.prompt_confirm("Are you sure you want to reset the network?", default=False):
             return
 
-        ui.print_header("Starting Network")
-        ui.print_info(
-            f"Connecting to {coordinator.radio_type.pretty_name} "
-            f"at {coordinator.port}..."
-        )
-
-        try:
-            gateway = await self._network_manager.start_network(coordinator)
-            self._pairing_manager = DevicePairingManager(gateway)
-            ui.print_success("Network started successfully!")
-
-            # Show device count
-            devices = self._network_manager.get_devices()
-            ui.print_info(f"Found {len(devices)} paired device(s)")
-
-        except Exception as exc:
-            ui.print_error(f"Failed to start network: {exc}")
-            _LOGGER.exception("Network start failed")
+        ui.print_info("Resetting network...")
+        await self._network_manager.shutdown()
+        self._pairing_manager = None
+        ui.print_success("Network has been reset")
 
     async def _pair_device(self) -> None:
         """Enable pairing mode to add new devices."""
-        if not self._network_manager.is_running:
-            ui.print_error("Network is not running. Start the network first.")
-            return
-
         ui.print_header("Device Pairing")
 
         duration = ui.prompt_int("Pairing duration (seconds)", default=60)
@@ -248,11 +260,7 @@ class ZHACli:
 
     async def _list_devices(self) -> None:
         """List all paired devices."""
-        if not self._network_manager.is_running:
-            ui.print_error("Network is not running. Start the network first.")
-            return
-
-        ui.print_header("Paired Devices")
+        ui.print_header("Connected Devices")
 
         devices = self._network_manager.get_devices()
         if not devices:
@@ -263,10 +271,6 @@ class ZHACli:
 
     async def _control_device(self) -> None:
         """Control a device."""
-        if not self._network_manager.is_running:
-            ui.print_error("Network is not running. Start the network first.")
-            return
-
         ui.print_header("Device Control")
 
         # Get devices
