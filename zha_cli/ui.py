@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 if TYPE_CHECKING:
@@ -23,6 +22,16 @@ MENU_CANCEL = 0
 # Number of visible options in the menu
 VISIBLE_OPTIONS = 3
 
+# Box drawing characters (rounded corners)
+BOX_TL = "╭"  # Top left
+BOX_TR = "╮"  # Top right
+BOX_BL = "╰"  # Bottom left
+BOX_BR = "╯"  # Bottom right
+BOX_H = "─"  # Horizontal
+BOX_V = "│"  # Vertical
+BOX_LT = "├"  # Left T
+BOX_RT = "┤"  # Right T
+
 
 def clear_screen() -> None:
     """Clear the terminal screen."""
@@ -31,8 +40,45 @@ def clear_screen() -> None:
 
 def _get_terminal_size() -> tuple[int, int]:
     """Get terminal width and height."""
-    size = os.get_terminal_size()
-    return size.columns, size.lines
+    try:
+        size = os.get_terminal_size()
+        return size.columns, size.lines
+    except OSError:
+        return 80, 24
+
+
+def _render_small_box(text: str, width: int = 5, highlight: bool = True) -> list[str]:
+    """Render a small rounded box with text centered."""
+    inner = text.center(width - 2)
+    style = "bold yellow" if highlight else "dim"
+    return [
+        f"[{style}]{BOX_TL}{BOX_H * (width - 2)}{BOX_TR}[/{style}]",
+        f"[{style}]{BOX_V}{inner}{BOX_V}[/{style}]",
+        f"[{style}]{BOX_BL}{BOX_H * (width - 2)}{BOX_BR}[/{style}]",
+    ]
+
+
+def _render_option_box(text: str, width: int, highlighted: bool = False) -> list[str]:
+    """Render an option inside a rounded box."""
+    inner_width = width - 4
+    display_text = text[:inner_width].ljust(inner_width)
+    style = "bold cyan" if highlighted else ""
+    end_style = "/bold cyan" if highlighted else ""
+
+    return [
+        f"  [{style}]{BOX_TL}{BOX_H * (width - 4)}{BOX_TR}[{end_style}]  ",
+        f"  [{style}]{BOX_V} {display_text} {BOX_V}[{end_style}]  ",
+        f"  [{style}]{BOX_BL}{BOX_H * (width - 4)}{BOX_BR}[{end_style}]  ",
+    ]
+
+
+def _render_empty_option_slot(width: int) -> list[str]:
+    """Render empty space for an option slot."""
+    return [
+        " " * width,
+        " " * width,
+        " " * width,
+    ]
 
 
 def _render_menu_box(
@@ -41,86 +87,107 @@ def _render_menu_box(
     scroll_offset: int,
     show_back: bool,
     show_home: bool,
-    box_width: int = 50,
+    box_width: int = 54,
 ) -> None:
     """Render the menu box with controls."""
     clear_screen()
 
     term_width, term_height = _get_terminal_size()
 
-    # Calculate centering
-    left_margin = max(0, (term_width - box_width - 12) // 2)  # 12 for side controls
-    top_margin = max(0, (term_height - 12) // 2)  # 12 for box height approx
+    # Calculate dimensions
+    btn_width = 5
+    total_width = btn_width + 2 + box_width + 2 + btn_width
+
+    left_margin = max(0, (term_width - total_width) // 2)
+    # Height: title(3) + separator(1) + options(3*3) + padding(2) + bottom(1) = ~16 lines
+    top_margin = max(0, (term_height - 20) // 2)
+
+    prefix = " " * left_margin
+    btn_spacer = " " * btn_width
 
     # Print top margin
     console.print("\n" * top_margin, end="")
 
-    # Prepare visible options (max 3)
+    # Prepare visible options
     total_options = len(options)
     visible_opts = options[scroll_offset : scroll_offset + VISIBLE_OPTIONS]
-
-    # Pad to always show 3 slots
     while len(visible_opts) < VISIBLE_OPTIONS:
-        visible_opts.append("")
+        visible_opts.append(None)  # type: ignore
 
     can_scroll_up = scroll_offset > 0
     can_scroll_down = scroll_offset + VISIBLE_OPTIONS < total_options
 
-    # Build the box content
-    inner_width = box_width - 4  # Account for borders and padding
+    # === Main box top border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
 
-    # Top border
-    prefix = " " * left_margin
-    console.print(f"{prefix}      ┌{'─' * (box_width - 2)}┐")
+    # === Title row ===
+    title_text = title[: box_width - 4].center(box_width - 4)
+    console.print(
+        f"{prefix}{btn_spacer}  {BOX_V}[bold cyan]{title_text}[/bold cyan]{BOX_V}"
+    )
 
-    # Title row
-    title_text = title[:inner_width].center(inner_width)
-    console.print(f"{prefix}      │ [bold cyan]{title_text}[/bold cyan] │")
+    # === Separator ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
 
-    # Separator
-    console.print(f"{prefix}      ├{'─' * (box_width - 2)}┤")
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
 
-    # Option rows with side controls
+    # === Option rows with side controls ===
     for i, opt in enumerate(visible_opts):
-        opt_num = scroll_offset + i + 1
-        left_ctrl = f"[bold yellow][{i + 1}][/bold yellow]" if opt else "   "
+        # Prepare the option box (3 lines)
+        if opt is not None:
+            opt_box = _render_option_box(
+                f"{scroll_offset + i + 1}. {opt}", box_width - 4
+            )
+            left_btn = _render_small_box(str(i + 1), btn_width, highlight=True)
+        else:
+            opt_box = _render_empty_option_slot(box_width - 4)
+            left_btn = [" " * btn_width] * 3
 
+        # Right side buttons (u for first row, d for third row)
         if i == 0:
-            right_ctrl = (
-                "[bold cyan][u][/bold cyan]" if can_scroll_up else "[dim][u][/dim]"
-            )
+            right_btn = _render_small_box("u", btn_width, highlight=can_scroll_up)
         elif i == 2:
-            right_ctrl = (
-                "[bold cyan][d][/bold cyan]" if can_scroll_down else "[dim][d][/dim]"
+            right_btn = _render_small_box("d", btn_width, highlight=can_scroll_down)
+        else:
+            right_btn = [" " * btn_width] * 3
+
+        # Print all 3 lines for this option
+        for line_idx in range(3):
+            console.print(
+                f"{prefix}{left_btn[line_idx]}  "
+                f"{BOX_V}{opt_box[line_idx]}{BOX_V}  "
+                f"{right_btn[line_idx]}"
             )
-        else:
-            right_ctrl = "   "
 
-        if opt:
-            # Format option text
-            opt_display = f"{opt_num}. {opt}"
-            if len(opt_display) > inner_width:
-                opt_display = opt_display[: inner_width - 3] + "..."
-            opt_display = opt_display.ljust(inner_width)
-        else:
-            opt_display = " " * inner_width
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
 
-        console.print(f"{prefix} {left_ctrl}  │ {opt_display} │  {right_ctrl}")
+    # === Main box bottom border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
 
-    # Bottom border
-    console.print(f"{prefix}      └{'─' * (box_width - 2)}┘")
+    # === Navigation buttons ===
+    if show_back:
+        back_btn = _render_small_box("b", 8, highlight=True)
+    else:
+        back_btn = [" " * 8] * 3
 
-    # Navigation row
-    back_text = "[bold yellow][b][/bold yellow] Back" if show_back else "      "
-    home_text = "[bold yellow][h][/bold yellow] Home" if show_home else "      "
+    if show_home:
+        home_btn = _render_small_box("h", 8, highlight=True)
+    else:
+        home_btn = [" " * 8] * 3
 
-    nav_spacing = box_width - 12  # Space between back and home
-    console.print(f"{prefix} {back_text}{' ' * nav_spacing}{home_text}")
+    nav_spacing = box_width - 8
+    for line_idx in range(3):
+        console.print(
+            f"{prefix}{back_btn[line_idx]}{' ' * nav_spacing}{home_btn[line_idx]}"
+        )
 
-    # Scroll indicator
+    # === Scroll indicator ===
     if total_options > VISIBLE_OPTIONS:
         indicator = f"[dim]({scroll_offset + 1}-{min(scroll_offset + VISIBLE_OPTIONS, total_options)} of {total_options})[/dim]"
-        console.print(f"{prefix}      {indicator}")
+        indicator_padding = " " * ((total_width - 20) // 2)
+        console.print(f"{prefix}{indicator_padding}{indicator}")
 
     console.print()
 
@@ -149,13 +216,11 @@ def prompt_menu(
             console.print("  [dim]Enter choice:[/dim] ", end="")
             response = input().strip().lower()
 
-            # Navigation shortcuts
             if response == "b" and show_back:
                 return MENU_BACK
             if response == "h" and show_home:
                 return MENU_HOME
 
-            # Scroll controls
             if response == "u":
                 if scroll_offset > 0:
                     scroll_offset -= 1
@@ -165,15 +230,13 @@ def prompt_menu(
                     scroll_offset += 1
                 continue
 
-            # Number selection (1, 2, 3 for visible options)
             if response in ("1", "2", "3"):
                 visible_idx = int(response) - 1
                 actual_idx = scroll_offset + visible_idx
                 if actual_idx < total_options:
-                    return actual_idx + 1  # Return 1-indexed
+                    return actual_idx + 1
                 continue
 
-            # Direct number input for any option
             try:
                 choice = int(response)
                 if 1 <= choice <= total_options:
@@ -187,22 +250,105 @@ def prompt_menu(
             return MENU_CANCEL
 
 
-def spinner(message: str) -> Progress:
-    """Return a spinner context manager for loading screens."""
+def _render_loading_box(message: str, spinner_char: str, box_width: int = 54) -> None:
+    """Render a centered loading box with spinner."""
     clear_screen()
-    return Progress(
-        SpinnerColumn(),
-        TextColumn("[cyan]{task.description}"),
-        console=console,
-        transient=True,
-    )
+
+    term_width, term_height = _get_terminal_size()
+    left_margin = max(0, (term_width - box_width) // 2)
+    top_margin = max(0, (term_height - 10) // 2)
+
+    prefix = " " * left_margin
+    inner_width = box_width - 4
+
+    console.print("\n" * top_margin, end="")
+
+    # Top border
+    console.print(f"{prefix}{BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
+
+    # Empty row
+    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # Message row (centered)
+    msg_text = message[: inner_width - 2].center(inner_width)
+    console.print(f"{prefix}{BOX_V} [cyan]{msg_text}[/cyan] {BOX_V}")
+
+    # Empty row
+    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # Spinner row (centered)
+    spinner_text = spinner_char.center(inner_width)
+    console.print(f"{prefix}{BOX_V} [bold yellow]{spinner_text}[/bold yellow] {BOX_V}")
+
+    # Empty row
+    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # Bottom border
+    console.print(f"{prefix}{BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
+
+
+class LoadingSpinner:
+    """A loading spinner context manager that displays in a centered box."""
+
+    SPINNER_CHARS = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        self._task: asyncio.Task | None = None
+        self._running = False
+
+    async def _animate(self) -> None:
+        """Animate the spinner."""
+        idx = 0
+        while self._running:
+            _render_loading_box(self.message, self.SPINNER_CHARS[idx])
+            idx = (idx + 1) % len(self.SPINNER_CHARS)
+            await asyncio.sleep(0.1)
+
+    def start(self) -> None:
+        """Start the spinner animation."""
+        self._running = True
+        self._task = asyncio.create_task(self._animate())
+
+    async def stop(self) -> None:
+        """Stop the spinner animation."""
+        self._running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+
+
+class SpinnerContext:
+    """Synchronous context manager for spinner (renders once)."""
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        self._task_desc = message
+
+    def __enter__(self) -> "SpinnerContext":
+        _render_loading_box(self.message, "⠋")
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        pass
+
+    def add_task(self, description: str) -> None:
+        """Update the task description (compatibility method)."""
+        self._task_desc = description
+        _render_loading_box(description, "⠋")
+
+
+def spinner(message: str) -> SpinnerContext:
+    """Return a spinner context manager for loading screens."""
+    return SpinnerContext(message)
 
 
 def print_header(title: str) -> None:
-    """Print a styled header."""
+    """Print a styled header (clears screen)."""
     clear_screen()
-    console.print()
-    console.print(Panel(title, style="bold blue"))
 
 
 def print_success(message: str) -> None:
@@ -233,11 +379,7 @@ def print_coordinators_table(coordinators: list[DetectedCoordinator]) -> None:
     table.add_column("Type", style="yellow")
 
     for idx, coord in enumerate(coordinators, 1):
-        table.add_row(
-            str(idx),
-            coord.port,
-            coord.radio_type.pretty_name,
-        )
+        table.add_row(str(idx), coord.port, coord.radio_type.pretty_name)
 
     console.print()
     console.print(table)
@@ -255,12 +397,7 @@ def print_devices_table(devices: list[dict[str, Any]]) -> None:
     for idx, device in enumerate(devices, 1):
         name = device["name"] or device["model"] or str(device["ieee"])
         status = "[green]●[/green]" if device["available"] else "[red]●[/red]"
-        table.add_row(
-            str(idx),
-            name,
-            device["model"] or "-",
-            status,
-        )
+        table.add_row(str(idx), name, device["model"] or "-", status)
 
     console.print()
     console.print(table)
@@ -295,13 +432,55 @@ def _format_entity_state(entity: dict[str, Any]) -> str:
 
 
 def prompt_confirm(message: str, default: bool = True) -> bool:
-    """Prompt for confirmation."""
+    """Prompt for confirmation in a centered box."""
+    box_width = 54
+    term_width, term_height = _get_terminal_size()
+    left_margin = max(0, (term_width - box_width) // 2)
+    top_margin = max(0, (term_height - 10) // 2)
+
     clear_screen()
-    default_str = "Y/n" if default else "y/N"
+    prefix = " " * left_margin
+    inner_width = box_width - 4
+
+    console.print("\n" * top_margin, end="")
+    console.print(f"{prefix}{BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
+    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # Message (word wrap)
+    words = message.split()
+    lines = []
+    current = ""
+    for word in words:
+        if len(current) + len(word) + 1 <= inner_width - 2:
+            current = f"{current} {word}".strip()
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+
+    for line in lines[:2]:
+        console.print(f"{prefix}{BOX_V} {line.center(inner_width)} {BOX_V}")
+
+    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # Y/N buttons
+    yes_btn = _render_small_box("y", 5, highlight=default)
+    no_btn = _render_small_box("n", 5, highlight=not default)
+    btn_spacing = inner_width - 16
+
+    for i in range(3):
+        console.print(
+            f"{prefix}{BOX_V}   {yes_btn[i]}{' ' * btn_spacing}{no_btn[i]}   {BOX_V}"
+        )
+
+    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+    console.print(f"{prefix}{BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
     console.print()
-    console.print(f"  {message} [{default_str}]: ", end="")
 
     try:
+        console.print(f"{prefix}  [dim]Enter choice (y/n):[/dim] ", end="")
         response = input().strip().lower()
         if not response:
             return default
@@ -337,45 +516,52 @@ def prompt_str(message: str, default: str | None = None) -> str:
 
 
 def show_message(title: str, message: str, wait: bool = True) -> None:
-    """Show a message in a box."""
-    clear_screen()
-
+    """Show a message in a centered box."""
+    box_width = 54
     term_width, term_height = _get_terminal_size()
-    box_width = 50
     left_margin = max(0, (term_width - box_width) // 2)
-    top_margin = max(0, (term_height - 8) // 2)
+    top_margin = max(0, (term_height - 10) // 2)
 
+    clear_screen()
     prefix = " " * left_margin
+    inner_width = box_width - 4
 
     console.print("\n" * top_margin, end="")
-    console.print(f"{prefix}┌{'─' * (box_width - 2)}┐")
+    console.print(f"{prefix}{BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
 
-    inner_width = box_width - 4
-    title_text = title[:inner_width].center(inner_width)
-    console.print(f"{prefix}│ [bold cyan]{title_text}[/bold cyan] │")
+    # Title
+    title_text = title[: inner_width - 2].center(inner_width)
+    console.print(f"{prefix}{BOX_V} [bold cyan]{title_text}[/bold cyan] {BOX_V}")
 
-    console.print(f"{prefix}├{'─' * (box_width - 2)}┤")
+    console.print(f"{prefix}{BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
+    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
 
     # Word wrap message
     words = message.split()
     lines = []
-    current_line = ""
+    current = ""
     for word in words:
-        if len(current_line) + len(word) + 1 <= inner_width:
-            current_line = f"{current_line} {word}".strip()
+        if len(current) + len(word) + 1 <= inner_width - 2:
+            current = f"{current} {word}".strip()
         else:
-            if current_line:
-                lines.append(current_line)
-            current_line = word
-    if current_line:
-        lines.append(current_line)
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
 
-    for line in lines[:3]:  # Max 3 lines
-        console.print(f"{prefix}│ {line.ljust(inner_width)} │")
+    for line in lines[:3]:
+        console.print(f"{prefix}{BOX_V} {line.ljust(inner_width)} {BOX_V}")
 
-    console.print(f"{prefix}└{'─' * (box_width - 2)}┘")
+    # Pad remaining lines
+    for _ in range(3 - len(lines[:3])):
+        console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+    console.print(f"{prefix}{BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
 
     if wait:
+        console.print()
         console.print(f"{prefix}  [dim]Press Enter to continue...[/dim]")
         try:
             input()
