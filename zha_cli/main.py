@@ -38,8 +38,6 @@ class ZHACli:
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, self._signal_handler)
 
-        ui.print_header("ZHA CLI - Zigbee Home Automation")
-
         # Run coordinator detection on entry
         await self._coordinator_entry_flow()
 
@@ -54,6 +52,7 @@ class ZHACli:
     async def _coordinator_entry_flow(self) -> None:
         """Handle coordinator detection and selection on entry."""
         previous_count = len(self._detected_coordinators)
+        auto_restored = False
 
         while self._running and not self._selected_coordinator:
             await self._detect_coordinators_with_spinner()
@@ -75,28 +74,41 @@ class ZHACli:
                 # choice == 1 means retry, loop continues
                 previous_count = 0
             else:
-                # Check for coordinators with existing networks
-                coords_with_network = [
-                    c
-                    for c in self._detected_coordinators
-                    if self._network_manager.has_existing_network(c)
-                ]
-
-                # Auto-connect if exactly one coordinator has an existing network
-                if len(coords_with_network) == 1:
-                    coord = coords_with_network[0]
-                    ui.print_info(
-                        f"Found existing network on {coord.port}, auto-connecting..."
-                    )
-                    self._selected_coordinator = coord
-                    await self._ensure_network_started()
-                    break
+                # Auto-restore network if exactly one coordinator has existing network
+                if not auto_restored:
+                    coords_with_network = [
+                        c
+                        for c in self._detected_coordinators
+                        if self._network_manager.has_existing_network(c)
+                    ]
+                    if len(coords_with_network) == 1:
+                        coord = coords_with_network[0]
+                        ui.print_info(f"Restoring network on {coord.port}...")
+                        await self._auto_restore_network(coord)
+                        auto_restored = True
 
                 result = await self._select_coordinator_menu()
                 if result in ("retry", "settings"):
                     previous_count = len(self._detected_coordinators)
                     continue
                 break
+
+    async def _auto_restore_network(self, coordinator: DetectedCoordinator) -> None:
+        """Auto-restore a network without selecting it for UI navigation."""
+        with ui.spinner("Restoring network...") as progress:
+            progress.add_task("Initializing Zigbee network...")
+            try:
+                gateway = await self._network_manager.start_network(coordinator)
+                self._pairing_manager = DevicePairingManager(gateway)
+                # Note: Don't set _selected_coordinator here
+            except Exception as exc:
+                ui.print_error(f"Failed to restore network: {exc}")
+                _LOGGER.exception("Network restore failed")
+                return
+
+        ui.print_success("Network restored!")
+        devices = self._network_manager.get_devices()
+        ui.print_info(f"Found {len(devices)} paired device(s)")
 
     async def _detect_coordinators_with_spinner(self) -> None:
         """Detect coordinators with a loading spinner."""
@@ -116,14 +128,21 @@ class ZHACli:
             "retry" if retry detection was chosen
             "exit" if user wants to exit
         """
-        ui.print_coordinators_table(self._detected_coordinators)
+        # Check which coordinator is currently connected (if any)
+        current_coord = self._network_manager.coordinator
 
         # Build options with network status indicators
         options = []
         for coord in self._detected_coordinators:
+            is_connected = (
+                current_coord is not None and coord.port == current_coord.port
+            )
             has_network = self._network_manager.has_existing_network(coord)
-            if has_network:
-                options.append(f"[green]●[/green] {coord.port} (existing network)")
+
+            if is_connected:
+                options.append(f"[green]●[/green] {coord.port} (connected)")
+            elif has_network:
+                options.append(f"[yellow]●[/yellow] {coord.port} (saved network)")
             else:
                 options.append(f"[dim]○[/dim] {coord.port} (new)")
 
@@ -143,8 +162,17 @@ class ZHACli:
             self._running = False
             return "exit"
         elif 1 <= choice <= len(self._detected_coordinators):
-            self._selected_coordinator = self._detected_coordinators[choice - 1]
-            await self._ensure_network_started()
+            selected = self._detected_coordinators[choice - 1]
+
+            # Check if this coordinator is already connected
+            if current_coord is not None and selected.port == current_coord.port:
+                # Already connected, just select it
+                self._selected_coordinator = selected
+            else:
+                # Different coordinator - need to switch networks
+                self._selected_coordinator = selected
+                await self._ensure_network_started()
+
             return "selected"
         elif choice == retry_idx + 1:
             return "retry"
@@ -195,15 +223,23 @@ class ZHACli:
 
     async def _ensure_network_started(self) -> None:
         """Ensure the network is started, auto-starting if needed."""
-        if self._network_manager.is_running:
-            ui.print_success("Network is already running")
-            devices = self._network_manager.get_devices()
-            ui.print_info(f"Found {len(devices)} paired device(s)")
-            return
-
         coordinator = self._selected_coordinator
         if coordinator is None:
             return
+
+        # Check if we need to switch coordinators
+        current_coord = self._network_manager.coordinator
+        if self._network_manager.is_running:
+            if current_coord is not None and current_coord.port == coordinator.port:
+                # Already running on correct coordinator
+                ui.print_success("Network is already running")
+                devices = self._network_manager.get_devices()
+                ui.print_info(f"Found {len(devices)} paired device(s)")
+                return
+            else:
+                # Different coordinator - shut down current first
+                ui.print_info("Switching coordinators...")
+                await self._network_manager.shutdown()
 
         # Check if we're restoring an existing network
         has_existing = self._network_manager.has_existing_network(coordinator)
@@ -281,8 +317,7 @@ class ZHACli:
         if choice in (0, MENU_HOME):
             self._running = False
         elif choice == MENU_BACK:
-            # Back goes to coordinator selection
-            await self._network_manager.shutdown()
+            # Back goes to coordinator selection (keep network running)
             self._selected_coordinator = None
             await self._coordinator_entry_flow()
         elif devices and choice <= len(devices):
@@ -374,15 +409,10 @@ class ZHACli:
             # Fetch fresh device reference to ensure entities are current
             fresh_info = self._network_manager.get_device_by_ieee(ieee)
             if fresh_info is None:
-                ui.print_error("Device no longer available")
+                ui.show_message("Error", "Device no longer available")
                 return
 
             device = fresh_info["device"]
-
-            ui.print_header(f"Device: {name}")
-            ui.print_info(f"Manufacturer: {fresh_info['manufacturer']}")
-            ui.print_info(f"Model: {fresh_info['model']}")
-            ui.print_info(f"IEEE: {fresh_info['ieee']}")
 
             # Get controllable entities
             entities = DeviceController.get_controllable_entities(device)
@@ -391,36 +421,25 @@ class ZHACli:
                 # Show diagnostic info
                 all_entities = DeviceController.get_all_entities(device)
                 if all_entities:
-                    ui.print_warning(
-                        f"Device has {len(all_entities)} entities but none are controllable"
-                    )
-                    for ent in all_entities:
-                        ui.print_info(f"  - {ent.PLATFORM}: {ent.unique_id}")
+                    msg = f"Device has {len(all_entities)} entities but none are controllable"
                 else:
-                    ui.print_warning("No entities found for this device")
-                    ui.print_info(
-                        "The device may still be initializing. Try again shortly."
-                    )
-                ui.prompt_str("Press Enter to go back", default="")
+                    msg = "No entities found. Device may still be initializing."
+                ui.show_message(name, msg)
                 return
 
-            # Show entities with control options
-            entity_infos = [DeviceController.get_entity_info(e) for e in entities]
-            ui.print_entities_table(entity_infos)
-
             # Build options: one per entity for toggle
+            entity_infos = [DeviceController.get_entity_info(e) for e in entities]
             options: list[str] = []
-            for i, entity in enumerate(entities):
-                info = entity_infos[i]
+            for info in entity_infos:
                 state = info.get("state", {})
                 is_on = state.get("state") or state.get("on")
-                status = "ON" if is_on else "OFF"
+                status = "[ON]" if is_on else "[OFF]"
                 entity_name = info.get("fallback_name") or info.get(
                     "unique_id", "Unknown"
                 )
-                options.append(f"Toggle {entity_name} ({status})")
+                options.append(f"{entity_name} {status}")
 
-            choice = ui.prompt_menu("Control", options, show_back=True, show_home=True)
+            choice = ui.prompt_menu(name, options, show_back=True, show_home=True)
 
             if choice in (0, MENU_BACK):
                 return
