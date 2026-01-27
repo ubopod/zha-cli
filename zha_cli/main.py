@@ -15,6 +15,7 @@ from zha_cli.coordinator_probe import DetectedCoordinator, discover_coordinators
 from zha_cli.device_control import DeviceController
 from zha_cli.device_pairing import DevicePairingManager
 from zha_cli.network_manager import NetworkManager
+from zha_cli.ui import MENU_BACK, MENU_HOME
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,9 +57,11 @@ class ZHACli:
             await self._detect_coordinators_with_spinner()
 
             if not self._detected_coordinators:
-                options = ["Retry detection", "Exit"]
-                choice = ui.prompt_menu("No Coordinators Found", options)
-                if choice == 0 or choice == 2:
+                options = ["Retry detection"]
+                choice = ui.prompt_menu(
+                    "No Coordinators Found", options, show_home=True
+                )
+                if choice in (0, MENU_HOME):
                     self._running = False
                     return
                 # choice == 1 means retry, loop continues
@@ -84,35 +87,28 @@ class ZHACli:
             options = [
                 f"Select {self._detected_coordinators[0].port}",
                 "Retry detection",
-                "Exit",
             ]
-            choice = ui.prompt_menu("Coordinator Found", options)
-            if choice == 0 or choice == 3:
+            choice = ui.prompt_menu("Coordinator Found", options, show_home=True)
+            if choice in (0, MENU_HOME):
                 self._running = False
             elif choice == 1:
                 self._selected_coordinator = self._detected_coordinators[0]
                 selected = True
             # choice == 2 means retry, will loop back
         else:
-            # Multiple coordinators found
-            options = [f"Select coordinator ({len(self._detected_coordinators)} found)"]
+            # Multiple coordinators found - list each one
+            options = []
+            for coord in self._detected_coordinators:
+                options.append(f"Select {coord.port}")
             options.append("Retry detection")
-            options.append("Exit")
-            choice = ui.prompt_menu("Coordinators Found", options)
+            choice = ui.prompt_menu("Coordinators Found", options, show_home=True)
 
-            if choice == 0 or choice == 3:
+            if choice in (0, MENU_HOME):
                 self._running = False
-            elif choice == 1:
-                coord_choice = ui.prompt_int(
-                    "Select coordinator number",
-                    default=1,
-                )
-                if 1 <= coord_choice <= len(self._detected_coordinators):
-                    self._selected_coordinator = self._detected_coordinators[
-                        coord_choice - 1
-                    ]
-                    selected = True
-            # choice == 2 means retry
+            elif 1 <= choice <= len(self._detected_coordinators):
+                self._selected_coordinator = self._detected_coordinators[choice - 1]
+                selected = True
+            # last option means retry
 
         # After selection, ensure network is started
         if selected and self._selected_coordinator:
@@ -171,37 +167,46 @@ class ZHACli:
         coordinator = self._selected_coordinator
         coord_info = f" - {coordinator.port}" if coordinator else ""
 
-        options = [
-            "Connected devices",
-            "Pair device",
-            "Control device",
-            "Reset network",
-            "Change coordinator",
-            "Exit",
-        ]
+        devices = self._network_manager.get_devices()
 
-        choice = ui.prompt_menu(f"Device Menu{coord_info}", options)
+        # Build menu options: devices first, then actions
+        options: list[str] = []
+        if devices:
+            for device in devices:
+                status = "[green]●[/green]" if device["available"] else "[red]●[/red]"
+                name = device["name"] or device["model"] or str(device["ieee"])
+                options.append(f"{status} {name}")
 
-        if choice == 0:
+        # Add action options
+        pair_idx = len(options)
+        options.append("Pair new device")
+        reset_idx = len(options)
+        options.append("Reset network")
+        change_idx = len(options)
+        options.append("Change coordinator")
+
+        title = f"Devices{coord_info}" if devices else f"No Devices{coord_info}"
+        choice = ui.prompt_menu(title, options, show_home=True)
+
+        if choice in (0, MENU_HOME):
             self._running = False
-        elif choice == 1:
-            await self._list_devices()
-        elif choice == 2:
+        elif devices and choice <= len(devices):
+            # Device selected
+            await self._control_device_direct(devices[choice - 1])
+        elif choice == pair_idx + 1:
             await self._pair_device()
-        elif choice == 3:
-            await self._control_device()
-        elif choice == 4:
+        elif choice == reset_idx + 1:
             await self._reset_network()
-        elif choice == 5:
+        elif choice == change_idx + 1:
             await self._network_manager.shutdown()
             self._selected_coordinator = None
             await self._coordinator_entry_flow()
-        elif choice == 6:
-            self._running = False
 
     async def _reset_network(self) -> None:
         """Reset (shutdown) the network."""
-        if not ui.prompt_confirm("Are you sure you want to reset the network?", default=False):
+        if not ui.prompt_confirm(
+            "Are you sure you want to reset the network?", default=False
+        ):
             return
 
         ui.print_info("Resetting network...")
@@ -211,9 +216,18 @@ class ZHACli:
 
     async def _pair_device(self) -> None:
         """Enable pairing mode to add new devices."""
-        ui.print_header("Device Pairing")
+        options = ["Start pairing (60 seconds)", "Start pairing (120 seconds)"]
+        choice = ui.prompt_menu(
+            "Device Pairing", options, show_back=True, show_home=True
+        )
 
-        duration = ui.prompt_int("Pairing duration (seconds)", default=60)
+        if choice in (0, MENU_BACK):
+            return
+        if choice == MENU_HOME:
+            self._running = False
+            return
+
+        duration = 60 if choice == 1 else 120
 
         ui.print_info(f"Enabling pairing mode for {duration} seconds...")
         ui.print_info("Put your Zigbee device in pairing mode now")
@@ -258,73 +272,57 @@ class ZHACli:
             ui.print_error(f"Pairing error: {exc}")
             _LOGGER.exception("Pairing failed")
 
-    async def _list_devices(self) -> None:
-        """List all paired devices."""
-        ui.print_header("Connected Devices")
+    async def _control_device_direct(self, device_info: dict[str, Any]) -> None:
+        """Control a specific device."""
+        device = device_info["device"]
+        name = device_info["name"] or device_info["model"] or str(device_info["ieee"])
 
-        devices = self._network_manager.get_devices()
-        if not devices:
-            ui.print_warning("No devices paired")
-            return
+        while True:
+            ui.print_header(f"Device: {name}")
+            ui.print_info(f"Manufacturer: {device_info['manufacturer']}")
+            ui.print_info(f"Model: {device_info['model']}")
+            ui.print_info(f"IEEE: {device_info['ieee']}")
 
-        ui.print_devices_table(devices)
+            # Get controllable entities
+            entities = DeviceController.get_controllable_entities(device)
 
-    async def _control_device(self) -> None:
-        """Control a device."""
-        ui.print_header("Device Control")
+            if not entities:
+                ui.print_warning("No controllable entities found for this device")
+                ui.prompt_str("Press Enter to go back", default="")
+                return
 
-        # Get devices
-        devices = self._network_manager.get_devices()
-        if not devices:
-            ui.print_warning("No devices paired")
-            return
+            # Show entities with control options
+            entity_infos = [DeviceController.get_entity_info(e) for e in entities]
+            ui.print_entities_table(entity_infos)
 
-        # Show devices and select one
-        ui.print_devices_table(devices)
-        device_choice = ui.prompt_int("Select device number", default=1)
+            # Build options: one per entity for toggle
+            options: list[str] = []
+            for i, entity in enumerate(entities):
+                info = entity_infos[i]
+                state = info.get("state", {})
+                is_on = state.get("state") or state.get("on")
+                status = "ON" if is_on else "OFF"
+                entity_name = info.get("fallback_name") or info.get(
+                    "unique_id", "Unknown"
+                )
+                options.append(f"Toggle {entity_name} ({status})")
 
-        if not (1 <= device_choice <= len(devices)):
-            ui.print_error("Invalid selection")
-            return
+            choice = ui.prompt_menu("Control", options, show_back=True, show_home=True)
 
-        selected_device = devices[device_choice - 1]["device"]
+            if choice in (0, MENU_BACK):
+                return
+            if choice == MENU_HOME:
+                self._running = False
+                return
 
-        # Get controllable entities
-        entities = DeviceController.get_controllable_entities(selected_device)
-
-        if not entities:
-            ui.print_warning("No controllable entities found for this device")
-            return
-
-        # Show entities
-        entity_infos = [DeviceController.get_entity_info(e) for e in entities]
-        ui.print_entities_table(entity_infos)
-
-        entity_choice = ui.prompt_int("Select entity number", default=1)
-
-        if not (1 <= entity_choice <= len(entities)):
-            ui.print_error("Invalid selection")
-            return
-
-        selected_entity = entities[entity_choice - 1]
-
-        # Show control options
-        control_options = ["Turn ON", "Turn OFF", "Toggle", "Back"]
-        control_choice = ui.prompt_menu("Control Action", control_options)
-
-        try:
-            if control_choice == 1:
-                await DeviceController.turn_on(selected_entity)
-                ui.print_success("Device turned ON")
-            elif control_choice == 2:
-                await DeviceController.turn_off(selected_entity)
-                ui.print_success("Device turned OFF")
-            elif control_choice == 3:
+            # Toggle the selected entity
+            selected_entity = entities[choice - 1]
+            try:
                 await DeviceController.toggle(selected_entity)
                 ui.print_success("Device toggled")
-        except Exception as exc:
-            ui.print_error(f"Control error: {exc}")
-            _LOGGER.exception("Control failed")
+            except Exception as exc:
+                ui.print_error(f"Control error: {exc}")
+                _LOGGER.exception("Control failed")
 
 
 def setup_logging(verbose: bool = False) -> None:

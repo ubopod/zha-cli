@@ -15,6 +15,11 @@ if TYPE_CHECKING:
 
 console = Console()
 
+# Menu navigation constants
+MENU_BACK = -1
+MENU_HOME = -2
+MENU_CANCEL = 0
+
 
 def spinner(message: str) -> Progress:
     """Return a spinner context manager for loading screens."""
@@ -127,21 +132,59 @@ def _format_entity_state(entity: dict[str, Any]) -> str:
     return "Unknown"
 
 
-def prompt_menu(title: str, options: list[str]) -> int:
-    """Display a menu and get user choice."""
+def prompt_menu(
+    title: str,
+    options: list[str],
+    show_back: bool = False,
+    show_home: bool = False,
+) -> int:
+    """Display a menu and get user choice.
+
+    Returns:
+        Positive int (1-N) for option selection
+        MENU_BACK (-1) if back selected
+        MENU_HOME (-2) if home selected
+        MENU_CANCEL (0) if cancelled (Ctrl+C)
+    """
     print_header(title)
     for idx, option in enumerate(options, 1):
         console.print(f"  [cyan]{idx}[/cyan]. {option}")
+
+    # Show navigation options
+    if show_back or show_home:
+        console.print()
+    if show_back:
+        console.print("  [dim cyan]b[/dim cyan]. Back")
+    if show_home:
+        console.print("  [dim cyan]h[/dim cyan]. Home")
     console.print()
 
     while True:
         try:
-            choice = IntPrompt.ask("Select option", default=1)
-            if 1 <= choice <= len(options):
-                return choice
-            print_error(f"Please enter a number between 1 and {len(options)}")
+            response = Prompt.ask("Select option", default="1")
+            response = response.strip().lower()
+
+            # Check for navigation shortcuts
+            if show_back and response == "b":
+                return MENU_BACK
+            if show_home and response == "h":
+                return MENU_HOME
+
+            # Try to parse as number
+            try:
+                choice = int(response)
+                if 1 <= choice <= len(options):
+                    return choice
+                print_error(f"Please enter a number between 1 and {len(options)}")
+            except ValueError:
+                valid = "1-" + str(len(options))
+                if show_back:
+                    valid += ", b"
+                if show_home:
+                    valid += ", h"
+                print_error(f"Please enter {valid}")
         except KeyboardInterrupt:
-            return 0
+            return MENU_CANCEL
 
 
 def prompt_confirm(message: str, default: bool = True) -> bool:
