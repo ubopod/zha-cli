@@ -367,20 +367,40 @@ class ZHACli:
 
     async def _control_device_direct(self, device_info: dict[str, Any]) -> None:
         """Control a specific device."""
-        device = device_info["device"]
-        name = device_info["name"] or device_info["model"] or str(device_info["ieee"])
+        ieee = str(device_info["ieee"])
+        name = device_info["name"] or device_info["model"] or ieee
 
         while True:
+            # Fetch fresh device reference to ensure entities are current
+            fresh_info = self._network_manager.get_device_by_ieee(ieee)
+            if fresh_info is None:
+                ui.print_error("Device no longer available")
+                return
+
+            device = fresh_info["device"]
+
             ui.print_header(f"Device: {name}")
-            ui.print_info(f"Manufacturer: {device_info['manufacturer']}")
-            ui.print_info(f"Model: {device_info['model']}")
-            ui.print_info(f"IEEE: {device_info['ieee']}")
+            ui.print_info(f"Manufacturer: {fresh_info['manufacturer']}")
+            ui.print_info(f"Model: {fresh_info['model']}")
+            ui.print_info(f"IEEE: {fresh_info['ieee']}")
 
             # Get controllable entities
             entities = DeviceController.get_controllable_entities(device)
 
             if not entities:
-                ui.print_warning("No controllable entities found for this device")
+                # Show diagnostic info
+                all_entities = DeviceController.get_all_entities(device)
+                if all_entities:
+                    ui.print_warning(
+                        f"Device has {len(all_entities)} entities but none are controllable"
+                    )
+                    for ent in all_entities:
+                        ui.print_info(f"  - {ent.PLATFORM}: {ent.unique_id}")
+                else:
+                    ui.print_warning("No entities found for this device")
+                    ui.print_info(
+                        "The device may still be initializing. Try again shortly."
+                    )
                 ui.prompt_str("Press Enter to go back", default="")
                 return
 

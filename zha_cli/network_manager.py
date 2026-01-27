@@ -221,3 +221,30 @@ class NetworkManager:
             )
 
         return devices
+
+    def get_device_by_ieee(self, ieee: str) -> dict | None:
+        """Get a fresh device reference by IEEE address.
+
+        Args:
+            ieee: The IEEE address of the device.
+
+        Returns:
+            Device info dictionary or None if not found.
+        """
+        if self._gateway is None:
+            return None
+
+        # Convert string IEEE to the format used by the gateway
+        for device in self._gateway.devices.values():
+            if str(device.ieee) == str(ieee):
+                return {
+                    "ieee": device.ieee,
+                    "nwk": device.nwk,
+                    "manufacturer": device.manufacturer,
+                    "model": device.model,
+                    "name": device.name,
+                    "available": device.available,
+                    "device": device,
+                }
+
+        return None
