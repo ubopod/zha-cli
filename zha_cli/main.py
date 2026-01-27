@@ -449,7 +449,7 @@ class ZHACli:
             for info in entity_infos:
                 state = info.get("state", {})
                 is_on = state.get("state") or state.get("on")
-                status = "[ON]" if is_on else "[OFF]"
+                status = "\\[ON]" if is_on else "\\[OFF]"
                 entity_name = info.get("fallback_name") or info.get(
                     "unique_id", "Unknown"
                 )
