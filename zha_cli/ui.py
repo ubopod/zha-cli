@@ -84,7 +84,7 @@ def _render_small_box(text: str, width: int = 5, highlight: bool = True) -> list
 
 def _render_option_box(text: str, width: int, highlighted: bool = False) -> list[str]:
     """Render an option inside a rounded box."""
-    inner_width = width - 4
+    inner_width = width - 6
     # Use _fit_text to handle Rich markup correctly
     display_text = _fit_text(text, inner_width)
 
@@ -104,10 +104,12 @@ def _render_option_box(text: str, width: int, highlighted: bool = False) -> list
 
 def _render_empty_option_slot(width: int) -> list[str]:
     """Render empty space for an option slot."""
+    # Match the visual width of _render_option_box (width + 2 for padding alignment)
+    slot_width = width + 2
     return [
-        " " * width,
-        " " * width,
-        " " * width,
+        " " * slot_width,
+        " " * slot_width,
+        " " * slot_width,
     ]
 
 
@@ -151,7 +153,7 @@ def _render_menu_box(
     console.print(f"{prefix}{btn_spacer}  {BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
 
     # === Title row ===
-    title_text = title[: box_width - 4].center(box_width - 4)
+    title_text = title[: box_width - 4].center(box_width - 2)
     console.print(
         f"{prefix}{btn_spacer}  {BOX_V}[bold cyan]{title_text}[/bold cyan]{BOX_V}"
     )
