@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
@@ -38,6 +39,29 @@ def clear_screen() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
 
+def _strip_rich_markup(text: str) -> str:
+    """Remove Rich markup tags from text to get visible content."""
+    return re.sub(r"\[/?[^\]]*\]", "", text)
+
+
+def _visible_len(text: str) -> int:
+    """Get the visible length of text (excluding Rich markup)."""
+    return len(_strip_rich_markup(text))
+
+
+def _fit_text(text: str, width: int) -> str:
+    """Truncate and pad text to exact visible width, preserving Rich markup."""
+    stripped = _strip_rich_markup(text)
+    visible_len = len(stripped)
+
+    if visible_len <= width:
+        # Just need to pad - add spaces after the text
+        return text + " " * (width - visible_len)
+    else:
+        # Need to truncate - strip markup and truncate for safety
+        return stripped[:width]
+
+
 def _get_terminal_size() -> tuple[int, int]:
     """Get terminal width and height."""
     try:
@@ -61,7 +85,8 @@ def _render_small_box(text: str, width: int = 5, highlight: bool = True) -> list
 def _render_option_box(text: str, width: int, highlighted: bool = False) -> list[str]:
     """Render an option inside a rounded box."""
     inner_width = width - 4
-    display_text = text[:inner_width].ljust(inner_width)
+    # Use _fit_text to handle Rich markup correctly
+    display_text = _fit_text(text, inner_width)
 
     if highlighted:
         start = "[bold cyan]"
