@@ -55,7 +55,10 @@ class ZHACli:
         auto_restored = False
 
         while self._running and not self._selected_coordinator:
-            await self._detect_coordinators_with_spinner()
+            # Only run detection if we don't already have coordinators
+            # (e.g., skip when navigating back from device menu)
+            if not self._detected_coordinators:
+                await self._detect_coordinators_with_spinner()
 
             if not self._detected_coordinators:
                 # Check if this was a retry that found nothing new
@@ -88,8 +91,12 @@ class ZHACli:
                         auto_restored = True
 
                 result = await self._select_coordinator_menu()
-                if result in ("retry", "settings"):
+                if result == "retry":
+                    # Clear coordinators to trigger re-detection
                     previous_count = len(self._detected_coordinators)
+                    self._detected_coordinators = []
+                    continue
+                elif result == "settings":
                     continue
                 break
 
