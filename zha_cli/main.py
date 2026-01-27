@@ -86,8 +86,17 @@ class ZHACli:
                     ]
                     if len(coords_with_network) == 1:
                         coord = coords_with_network[0]
-                        ui.print_info(f"Restoring network on {coord.port}...")
-                        await self._auto_restore_network(coord)
+                        # Skip if already running on this coordinator
+                        current = self._network_manager.coordinator
+                        if (
+                            current is not None
+                            and current.port == coord.port
+                            and self._network_manager.is_running
+                        ):
+                            ui.print_info(f"Network already running on {coord.port}")
+                        else:
+                            ui.print_info(f"Restoring network on {coord.port}...")
+                            await self._auto_restore_network(coord)
                         auto_restored = True
 
                 result = await self._select_coordinator_menu()
