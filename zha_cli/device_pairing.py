@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from zha.application.const import ZHA_GW_MSG_DEVICE_FULL_INIT, ZHA_GW_MSG_DEVICE_JOINED

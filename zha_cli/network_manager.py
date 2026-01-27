@@ -48,7 +48,7 @@ class NetworkManager:
         """Return True if the network is running."""
         return self._gateway is not None and not self._gateway.shutting_down
 
-    def _get_database_path(self, coordinator: DetectedCoordinator) -> Path:
+    def get_database_path(self, coordinator: DetectedCoordinator) -> Path:
         """Get the database path for a coordinator.
 
         Uses a hash of the port path to create a unique filename.
@@ -60,6 +60,15 @@ class NetworkManager:
         port_name = coordinator.port.replace("/", "_").replace("\\", "_")
         db_name = f"zigbee_{port_name}_{port_hash}.db"
         return self._data_dir / db_name
+
+    def has_existing_network(self, coordinator: DetectedCoordinator) -> bool:
+        """Check if a coordinator has an existing network database.
+
+        Returns:
+            True if a database file exists for this coordinator.
+        """
+        db_path = self.get_database_path(coordinator)
+        return db_path.exists() and db_path.stat().st_size > 0
 
     async def start_network(self, coordinator: DetectedCoordinator) -> Gateway:
         """Start the Zigbee network with the specified coordinator.
@@ -81,7 +90,7 @@ class NetworkManager:
             await self.shutdown()
 
         # Get persistent database path for this coordinator
-        db_path = self._get_database_path(coordinator)
+        db_path = self.get_database_path(coordinator)
 
         _LOGGER.info(
             "Starting network with %s at %s (%d baud), database: %s",
@@ -129,6 +138,40 @@ class NetworkManager:
         self._gateway = None
         self._coordinator = None
         _LOGGER.info("Network shut down successfully")
+
+    async def reset(self, coordinator: DetectedCoordinator | None = None) -> None:
+        """Reset the network completely, deleting all persistent data.
+
+        This shuts down the network and deletes the database file,
+        removing all paired devices and network configuration.
+
+        Args:
+            coordinator: The coordinator to reset. If None, uses the current coordinator.
+        """
+        coord = coordinator or self._coordinator
+        if coord is None:
+            _LOGGER.warning("No coordinator specified for reset")
+            return
+
+        # Shut down first if running
+        if self._gateway is not None:
+            await self.shutdown()
+
+        # Delete the database file
+        db_path = self.get_database_path(coord)
+        if db_path.exists():
+            _LOGGER.info("Deleting network database: %s", db_path)
+            db_path.unlink()
+
+            # Also delete any related files (e.g., -wal, -shm for SQLite)
+            for suffix in ["-wal", "-shm", "-journal"]:
+                related = db_path.with_suffix(db_path.suffix + suffix)
+                if related.exists():
+                    related.unlink()
+
+            _LOGGER.info("Network database deleted")
+        else:
+            _LOGGER.debug("No database to delete")
 
     def get_devices(self) -> list[dict]:
         """Get all paired devices.

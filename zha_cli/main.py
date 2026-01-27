@@ -73,6 +73,23 @@ class ZHACli:
                 # choice == 1 means retry, loop continues
                 previous_count = 0
             else:
+                # Check for coordinators with existing networks
+                coords_with_network = [
+                    c
+                    for c in self._detected_coordinators
+                    if self._network_manager.has_existing_network(c)
+                ]
+
+                # Auto-connect if exactly one coordinator has an existing network
+                if len(coords_with_network) == 1:
+                    coord = coords_with_network[0]
+                    ui.print_info(
+                        f"Found existing network on {coord.port}, auto-connecting..."
+                    )
+                    self._selected_coordinator = coord
+                    await self._ensure_network_started()
+                    break
+
                 result = await self._select_coordinator_menu()
                 if result == "retry":
                     previous_count = len(self._detected_coordinators)
@@ -99,42 +116,32 @@ class ZHACli:
         """
         ui.print_coordinators_table(self._detected_coordinators)
 
-        if len(self._detected_coordinators) == 1:
-            options = [
-                f"Select {self._detected_coordinators[0].port}",
-                "Retry detection",
-            ]
-            choice = ui.prompt_menu(
-                "Coordinator Found", options, show_back=True, show_home=True
-            )
-            if choice in (0, MENU_BACK, MENU_HOME):
-                self._running = False
-                return "exit"
-            elif choice == 1:
-                self._selected_coordinator = self._detected_coordinators[0]
-                await self._ensure_network_started()
-                return "selected"
+        # Build options with network status indicators
+        options = []
+        for coord in self._detected_coordinators:
+            has_network = self._network_manager.has_existing_network(coord)
+            if has_network:
+                options.append(f"[green]●[/green] {coord.port} (existing network)")
             else:
-                return "retry"
-        else:
-            # Multiple coordinators found - list each one
-            options = []
-            for coord in self._detected_coordinators:
-                options.append(f"Select {coord.port}")
-            options.append("Retry detection")
-            choice = ui.prompt_menu(
-                "Coordinators Found", options, show_back=True, show_home=True
-            )
+                options.append(f"[dim]○[/dim] {coord.port} (new)")
+        options.append("Retry detection")
 
-            if choice in (0, MENU_BACK, MENU_HOME):
-                self._running = False
-                return "exit"
-            elif 1 <= choice <= len(self._detected_coordinators):
-                self._selected_coordinator = self._detected_coordinators[choice - 1]
-                await self._ensure_network_started()
-                return "selected"
-            else:
-                return "retry"
+        title = (
+            "Coordinator Found"
+            if len(self._detected_coordinators) == 1
+            else "Coordinators Found"
+        )
+        choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
+
+        if choice in (0, MENU_BACK, MENU_HOME):
+            self._running = False
+            return "exit"
+        elif 1 <= choice <= len(self._detected_coordinators):
+            self._selected_coordinator = self._detected_coordinators[choice - 1]
+            await self._ensure_network_started()
+            return "selected"
+        else:
+            return "retry"
 
     async def _ensure_network_started(self) -> None:
         """Ensure the network is started, auto-starting if needed."""
@@ -148,12 +155,21 @@ class ZHACli:
         if coordinator is None:
             return
 
+        # Check if we're restoring an existing network
+        has_existing = self._network_manager.has_existing_network(coordinator)
+        if has_existing:
+            action = "Restoring"
+            spinner_msg = "Restoring network..."
+        else:
+            action = "Starting"
+            spinner_msg = "Starting network..."
+
         ui.print_info(
-            f"Starting network with {coordinator.radio_type.pretty_name} "
+            f"{action} network with {coordinator.radio_type.pretty_name} "
             f"at {coordinator.port}..."
         )
 
-        with ui.spinner("Starting network...") as progress:
+        with ui.spinner(spinner_msg) as progress:
             progress.add_task("Initializing Zigbee network...")
             try:
                 gateway = await self._network_manager.start_network(coordinator)
@@ -164,7 +180,11 @@ class ZHACli:
                 self._selected_coordinator = None
                 return
 
-        ui.print_success("Network started successfully!")
+        if has_existing:
+            ui.print_success("Network restored successfully!")
+        else:
+            ui.print_success("Network started successfully!")
+
         devices = self._network_manager.get_devices()
         ui.print_info(f"Found {len(devices)} paired device(s)")
 
@@ -224,16 +244,18 @@ class ZHACli:
             await self._reset_network()
 
     async def _reset_network(self) -> None:
-        """Reset (shutdown) the network."""
+        """Reset the network completely, deleting all paired devices."""
         if not ui.prompt_confirm(
-            "Are you sure you want to reset the network?", default=False
+            "This will DELETE all paired devices. Are you sure?", default=False
         ):
             return
 
-        ui.print_info("Resetting network...")
-        await self._network_manager.shutdown()
+        coordinator = self._selected_coordinator
+        ui.print_info("Resetting network and deleting all device data...")
+        await self._network_manager.reset(coordinator)
         self._pairing_manager = None
-        ui.print_success("Network has been reset")
+        self._selected_coordinator = None
+        ui.print_success("Network has been completely reset")
 
     async def _pair_device(self) -> None:
         """Enable pairing mode to add new devices."""
