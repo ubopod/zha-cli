@@ -100,10 +100,14 @@ class NetworkManager:
 
         zha_config = ZHAConfiguration(
             coordinator_configuration=coordinator_config,
-            database_path=str(db_path),
         )
 
-        zha_data = ZHAData(config=zha_config)
+        # Pass database path through zigpy_config
+        zigpy_config = {
+            "database_path": str(db_path),
+        }
+
+        zha_data = ZHAData(config=zha_config, zigpy_config=zigpy_config)
 
         # Create and initialize the gateway
         self._gateway = await Gateway.async_from_config(zha_data)
