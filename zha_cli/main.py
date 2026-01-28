@@ -190,19 +190,10 @@ class ZHACli:
             return "exit"
         elif 1 <= choice <= len(self._detected_coordinators):
             selected = self._detected_coordinators[choice - 1]
-
-            # Show coordinator submenu
-            result = await self._coordinator_submenu(selected)
-            if result == "connect":
-                # Start network if not already running on this coordinator
-                if current_coord is None or selected.port != current_coord.port:
-                    await self._ensure_network_started(selected)
-                return "selected"
-            elif result == "renamed":
-                return "settings"  # Refresh menu to show new name
-            else:
-                return "settings"  # Back pressed, stay in coordinator menu
-
+            # Connect directly when coordinator is selected
+            if current_coord is None or selected.port != current_coord.port:
+                await self._ensure_network_started(selected)
+            return "selected"
         elif choice == retry_idx + 1:
             return "retry"
         elif choice == settings_idx + 1:
@@ -210,42 +201,6 @@ class ZHACli:
             return "settings"
         else:
             return "retry"
-
-    async def _coordinator_submenu(self, coordinator: DetectedCoordinator) -> str:
-        """Display submenu for a selected coordinator.
-
-        Returns:
-            "connect" if user wants to connect
-            "renamed" if coordinator was renamed
-            "back" if user pressed back
-        """
-        name = self._network_manager.get_coordinator_name(coordinator.port)
-        display_name = name or coordinator.port
-
-        options = ["Connect", "Rename"]
-        title = f"◆ {display_name}"
-        choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
-
-        if choice in (0, MENU_HOME):
-            self._running = False
-            return "back"
-        elif choice == MENU_BACK:
-            return "back"
-        elif choice == 1:
-            return "connect"
-        elif choice == 2:
-            # Rename coordinator
-            current_name = name or f"{coordinator.radio_type.pretty_name} Coordinator"
-            new_name = ui.prompt_coordinator_name(
-                title="◆ Rename Coordinator",
-                port=coordinator.port,
-                radio_type=coordinator.radio_type.pretty_name,
-                default=current_name,
-            )
-            if new_name:
-                self._network_manager.set_coordinator_name(coordinator.port, new_name)
-            return "renamed"
-        return "back"
 
     async def _settings_menu(self) -> None:
         """Display settings menu."""
@@ -356,6 +311,8 @@ class ZHACli:
         options.append("Rename device")
         reset_idx = len(options)
         options.append("Reset network")
+        backups_idx = len(options)
+        options.append("Manage backups")
 
         title = "◆ Zigbee"
         choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
@@ -374,6 +331,8 @@ class ZHACli:
             await self._rename_device_menu()
         elif choice == reset_idx + 1:
             await self._reset_network()
+        elif choice == backups_idx + 1:
+            await self._backup_menu()
 
     async def _reset_network(self) -> None:
         """Reset the network completely, deleting all paired devices."""
@@ -392,6 +351,75 @@ class ZHACli:
             self._pairing_manager = None
             spin.set_status("Network reset complete")
             await asyncio.sleep(0.5)
+
+    async def _backup_menu(self) -> None:
+        """Display backup management menu."""
+        while True:
+            backups = self._network_manager.get_backups()
+
+            options = []
+            for b in backups:
+                options.append(
+                    ui.format_backup_option(
+                        b["backup_time"], b["device_count"], b["is_complete"]
+                    )
+                )
+
+            # Add action at bottom
+            options.append("Create new backup")
+
+            choice = ui.prompt_menu(
+                "◆ Backups", options, show_back=True, show_home=True
+            )
+
+            if choice in (0, MENU_BACK):
+                return
+            if choice == MENU_HOME:
+                self._running = False
+                return
+
+            if choice == len(backups) + 1:
+                # Create backup
+                async with ui.spinner("◆ Backups", status="Creating backup..."):
+                    await self._network_manager.create_backup()
+            else:
+                # Selected a backup - show detail menu
+                await self._backup_detail_menu(backups[choice - 1])
+
+    async def _backup_detail_menu(self, backup: dict) -> None:
+        """Show actions for a specific backup."""
+        options = ["Restore this backup", "Delete this backup"]
+
+        choice = ui.prompt_menu(
+            f"◆ Backup {backup['backup_time']}", options, show_back=True, show_home=True
+        )
+
+        if choice in (0, MENU_BACK):
+            return
+        if choice == MENU_HOME:
+            self._running = False
+            return
+
+        if choice == 1:
+            # Restore
+            confirm = ui.prompt_confirm(
+                "Restore network to this backup? Current state will be replaced.",
+                default=False,
+            )
+            if confirm is None:  # Home pressed
+                self._running = False
+                return
+            if confirm:
+                async with ui.spinner("◆ Backups", status="Restoring..."):
+                    await self._network_manager.restore_backup(backup["index"])
+        elif choice == 2:
+            # Delete
+            confirm = ui.prompt_confirm("Delete this backup?", default=False)
+            if confirm is None:  # Home pressed
+                self._running = False
+                return
+            if confirm:
+                await self._network_manager.delete_backup(backup["index"])
 
     async def _rename_device_menu(self) -> None:
         """Show device picker for renaming."""
@@ -681,6 +709,10 @@ class ZHACli:
                 sensors_idx = len(options)
                 options.append(f"View sensors ({len(sensors)})")
 
+            # Add remove device option
+            remove_idx = len(options)
+            options.append("Remove device")
+
             choice = ui.prompt_menu(
                 f"◆ {name}", options, show_back=True, show_home=True
             )
@@ -696,6 +728,13 @@ class ZHACli:
                 await self._view_sensors(device, name)
                 continue
 
+            if choice == remove_idx + 1:
+                # Remove device
+                removed = await self._remove_device(ieee, name)
+                if removed:
+                    return  # Go back to main menu after removal
+                continue
+
             # Toggle the selected entity
             if choice <= len(entities):
                 selected_entity = entities[choice - 1]
@@ -704,6 +743,37 @@ class ZHACli:
                 except Exception as exc:
                     ui.show_message("Error", f"Control failed: {exc}")
                     _LOGGER.exception("Control failed")
+
+    async def _remove_device(self, ieee: str, name: str) -> bool:
+        """Remove a device from the network.
+
+        Args:
+            ieee: The IEEE address of the device.
+            name: The display name of the device.
+
+        Returns:
+            True if the device was removed.
+        """
+        confirm = ui.prompt_confirm(
+            f"Remove {name} from the network? This cannot be undone.",
+            default=False,
+        )
+        if confirm is None:  # Home pressed
+            self._running = False
+            return False
+        if not confirm:
+            return False
+
+        async with ui.spinner("◆ Zigbee", status="Removing device...") as spin:
+            success = await self._network_manager.remove_device(ieee)
+            if success:
+                spin.set_status("Device removed")
+                await asyncio.sleep(0.5)
+            else:
+                ui.show_message("Error", "Failed to remove device")
+                return False
+
+        return True
 
     async def _view_sensors(self, device: Any, device_name: str) -> None:
         """View sensor values for a device."""
