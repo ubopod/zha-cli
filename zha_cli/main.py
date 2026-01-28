@@ -416,10 +416,66 @@ class ZHACli:
             ui.print_error(f"Pairing error: {exc}")
             _LOGGER.exception("Pairing failed")
 
+    async def _wait_for_entities(
+        self, ieee: str, name: str, max_wait: float = 10.0
+    ) -> list | None:
+        """Wait for device entities to be available.
+
+        Newly paired devices may take time to initialize. This method polls
+        for entities up to max_wait seconds before giving up.
+
+        Returns:
+            List of controllable entities, or None if device not found/no entities.
+        """
+        poll_interval = 1.0
+        elapsed = 0.0
+        shown_waiting = False
+
+        while elapsed < max_wait:
+            fresh_info = self._network_manager.get_device_by_ieee(ieee)
+            if fresh_info is None:
+                ui.show_message("Error", "Device no longer available")
+                return None
+
+            device = fresh_info["device"]
+            entities = DeviceController.get_controllable_entities(device)
+
+            if entities:
+                return entities
+
+            # No entities yet - show waiting message on first attempt
+            if not shown_waiting:
+                with ui.spinner("Waiting for device to initialize...") as progress:
+                    progress.add_task("Device is initializing, please wait...")
+                shown_waiting = True
+
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+        # Timed out - show diagnostic info
+        fresh_info = self._network_manager.get_device_by_ieee(ieee)
+        if fresh_info is None:
+            ui.show_message("Error", "Device no longer available")
+            return None
+
+        device = fresh_info["device"]
+        all_entities = DeviceController.get_all_entities(device)
+        if all_entities:
+            msg = f"Device has {len(all_entities)} entities but none are controllable"
+        else:
+            msg = "No entities found after waiting. Device may need more time."
+        ui.show_message(name, msg)
+        return None
+
     async def _control_device_direct(self, device_info: dict[str, Any]) -> None:
         """Control a specific device."""
         ieee = str(device_info["ieee"])
         name = device_info["name"] or device_info["model"] or ieee
+
+        # Wait for entities to be available (device may still be initializing)
+        entities = await self._wait_for_entities(ieee, name)
+        if entities is None:
+            return
 
         while True:
             # Fetch fresh device reference to ensure entities are current
