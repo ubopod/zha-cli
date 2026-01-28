@@ -28,7 +28,6 @@ class ZHACli:
         self._network_manager = NetworkManager()
         self._pairing_manager: DevicePairingManager | None = None
         self._detected_coordinators: list[DetectedCoordinator] = []
-        self._selected_coordinator: DetectedCoordinator | None = None
         self._running = True
 
     async def run(self) -> None:
@@ -53,8 +52,9 @@ class ZHACli:
         """Handle coordinator detection and selection on entry."""
         previous_count = len(self._detected_coordinators)
         auto_restored = False
+        selection_complete = False
 
-        while self._running and not self._selected_coordinator:
+        while self._running and not selection_complete:
             # Only run detection if we don't already have coordinators
             # (e.g., skip when navigating back from device menu)
             if not self._detected_coordinators:
@@ -107,7 +107,7 @@ class ZHACli:
                     continue
                 elif result == "settings":
                     continue
-                break
+                selection_complete = True
 
     async def _auto_restore_network(self, coordinator: DetectedCoordinator) -> None:
         """Auto-restore a network without selecting it for UI navigation."""
@@ -115,7 +115,6 @@ class ZHACli:
             try:
                 gateway = await self._network_manager.start_network(coordinator)
                 self._pairing_manager = DevicePairingManager(gateway)
-                # Note: Don't set _selected_coordinator here
             except Exception as exc:
                 ui.print_error(f"Failed to restore network: {exc}")
                 _LOGGER.exception("Network restore failed")
@@ -192,14 +191,9 @@ class ZHACli:
         elif 1 <= choice <= len(self._detected_coordinators):
             selected = self._detected_coordinators[choice - 1]
 
-            # Check if this coordinator is already connected
-            if current_coord is not None and selected.port == current_coord.port:
-                # Already connected, just select it
-                self._selected_coordinator = selected
-            else:
-                # Different coordinator - need to switch networks
-                self._selected_coordinator = selected
-                await self._ensure_network_started()
+            # Start network if not already running on this coordinator
+            if current_coord is None or selected.port != current_coord.port:
+                await self._ensure_network_started(selected)
 
             return "selected"
         elif choice == retry_idx + 1:
@@ -249,12 +243,11 @@ class ZHACli:
         deleted = self._network_manager.delete_all_networks()
         ui.print_success(f"Deleted {deleted} saved network(s)")
 
-    async def _ensure_network_started(self) -> None:
-        """Ensure the network is started, auto-starting if needed."""
-        coordinator = self._selected_coordinator
-        if coordinator is None:
-            return
+    async def _ensure_network_started(self, coordinator: DetectedCoordinator) -> bool:
+        """Ensure the network is started, auto-starting if needed.
 
+        Returns True if network is running, False if start failed.
+        """
         # Check if we need to switch coordinators
         current_coord = self._network_manager.coordinator
         if self._network_manager.is_running:
@@ -263,7 +256,7 @@ class ZHACli:
                 ui.print_success("Network is already running")
                 devices = self._network_manager.get_devices()
                 ui.print_info(f"Found {len(devices)} paired device(s)")
-                return
+                return True
             else:
                 # Different coordinator - shut down current first
                 ui.print_info("Switching coordinators...")
@@ -289,8 +282,7 @@ class ZHACli:
             except Exception as exc:
                 ui.print_error(f"Failed to start network: {exc}")
                 _LOGGER.exception("Network start failed")
-                self._selected_coordinator = None
-                return
+                return False
 
         if has_existing:
             ui.print_success("Network restored successfully!")
@@ -299,6 +291,7 @@ class ZHACli:
 
         devices = self._network_manager.get_devices()
         ui.print_info(f"Found {len(devices)} paired device(s)")
+        return True
 
     def _signal_handler(self) -> None:
         """Handle shutdown signals."""
@@ -314,11 +307,10 @@ class ZHACli:
         """Display and handle the main menu (device management)."""
         # If network isn't running (e.g., after a reset), go back to coordinator flow
         if not self._network_manager.is_running:
-            self._selected_coordinator = None
             await self._coordinator_entry_flow()
             return
 
-        coordinator = self._selected_coordinator
+        coordinator = self._network_manager.coordinator
         coord_name = coordinator.radio_type.pretty_name if coordinator else "Network"
 
         devices = self._network_manager.get_devices()
@@ -343,7 +335,6 @@ class ZHACli:
             self._running = False
         elif choice == MENU_BACK:
             # Back goes to coordinator selection (keep network running)
-            self._selected_coordinator = None
             await self._coordinator_entry_flow()
         elif devices and choice <= len(devices):
             # Device selected
@@ -360,11 +351,10 @@ class ZHACli:
         ):
             return
 
-        coordinator = self._selected_coordinator
+        coordinator = self._network_manager.coordinator
         ui.print_info("Resetting network and deleting all device data...")
         await self._network_manager.reset(coordinator)
         self._pairing_manager = None
-        self._selected_coordinator = None
         ui.print_success("Network has been completely reset")
 
     async def _pair_device(self) -> None:
@@ -571,12 +561,16 @@ class ZHACli:
             # Build options: one per entity for toggle, plus rename option
             entity_infos = [DeviceController.get_entity_info(e) for e in entities]
             options: list[str] = []
+            # Only show entity names if there are multiple entities
+            show_entity_names = len(entity_infos) > 1
             for info in entity_infos:
                 state = info.get("state", {})
                 is_on = state.get("state") or state.get("on")
-                entity_name = info.get("fallback_name") or info.get(
-                    "unique_id", "Unknown"
-                )
+                entity_name = None
+                if show_entity_names:
+                    entity_name = info.get("fallback_name") or info.get(
+                        "unique_id", "Unknown"
+                    )
                 options.append(ui.format_entity_option(entity_name, is_on))
 
             # Add rename option at the end
