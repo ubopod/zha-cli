@@ -734,7 +734,7 @@ def prompt_str(message: str, default: str | None = None) -> str:
 def prompt_device_name(
     title: str, manufacturer: str | None, model: str | None, default: str | None = None
 ) -> str | None:
-    """Prompt for a device name in a styled box.
+    """Prompt for a device name using the standard menu layout.
 
     Args:
         title: The title for the dialog.
@@ -746,51 +746,107 @@ def prompt_device_name(
         The entered name, or None if cancelled.
     """
     box_width = 54
+    btn_width = 5
+
     term_width, term_height = _get_terminal_size()
-    left_margin = max(0, (term_width - box_width) // 2)
-    top_margin = max(0, (term_height - 14) // 2)
+    total_width = btn_width + 2 + box_width + 2 + btn_width
+    left_margin = max(0, (term_width - total_width) // 2)
+    top_margin = max(0, (term_height - 20) // 2)
 
     clear_screen()
     prefix = " " * left_margin
-    inner_width = box_width - 4
+    btn_spacer = " " * btn_width
 
     console.print("\n" * top_margin, end="")
-    console.print(f"{prefix}{BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
 
-    # Title
-    title_text = title[: inner_width - 2].center(inner_width)
-    console.print(f"{prefix}{BOX_V} [bold cyan]{title_text}[/bold cyan] {BOX_V}")
+    # === Main box top border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
 
-    console.print(f"{prefix}{BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
-    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+    # === Title row ===
+    title_text = title[: box_width - 4].center(box_width - 2)
+    console.print(
+        f"{prefix}{btn_spacer}  {BOX_V}[bold cyan]{title_text}[/bold cyan]{BOX_V}"
+    )
 
-    # Device info
+    # === Separator ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
+
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # Build info lines for the 3 slots
+    info_lines: list[str] = []
     if manufacturer:
-        mfr_text = f"Manufacturer: {manufacturer}"[: inner_width - 2]
-        console.print(f"{prefix}{BOX_V} {mfr_text.ljust(inner_width)} {BOX_V}")
+        info_lines.append(f"Manufacturer: {manufacturer}")
     if model:
-        model_text = f"Model: {model}"[: inner_width - 2]
-        console.print(f"{prefix}{BOX_V} {model_text.ljust(inner_width)} {BOX_V}")
-
-    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
-
-    # Prompt hint
-    hint = "Enter a friendly name for this device:"
-    console.print(f"{prefix}{BOX_V} {hint.ljust(inner_width)} {BOX_V}")
-
+        info_lines.append(f"Model: {model}")
     if default:
-        default_hint = f"[dim](default: {default})[/dim]"
-        # Calculate visible length for padding
-        default_visible = f"(default: {default})"
-        padding = inner_width - len(default_visible)
-        console.print(f"{prefix}{BOX_V} {default_hint}{' ' * padding} {BOX_V}")
+        info_lines.append(f"Default: {default}")
 
-    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
-    console.print(f"{prefix}{BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
+    # Pad to 3 lines
+    while len(info_lines) < 3:
+        info_lines.append("")
+
+    # === Three option slot rows with dimmed buttons ===
+    for i in range(VISIBLE_OPTIONS):
+        left_btn = _render_small_box(str(i + 1), btn_width, highlight=False)
+
+        if i == 0:
+            right_btn = _render_small_box("u", btn_width, highlight=False)
+        elif i == 2:
+            right_btn = _render_small_box("d", btn_width, highlight=False)
+        else:
+            right_btn = [" " * btn_width] * 3
+
+        # Build info box for this slot
+        # Width is box_width - 1 because we add the right │ separately
+        msg_width = box_width - 1
+        right_padding = 4
+        inner_box_width = msg_width - right_padding
+        horiz_width = inner_box_width - 2
+
+        # Get info line for this slot
+        info_text = info_lines[i][: horiz_width - 2] if info_lines[i] else ""
+        msg_line = info_text.ljust(horiz_width - 2)
+
+        msg_box = [
+            f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_TR}[/dim]{' ' * right_padding}",
+            f"[dim]{BOX_V}[/dim] {msg_line} [dim]{BOX_V}[/dim]{' ' * right_padding}",
+            f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_BR}[/dim]{' ' * right_padding}",
+        ]
+
+        for line_idx in range(3):
+            console.print(
+                f"{prefix}{left_btn[line_idx]}  "
+                f"{msg_box[line_idx]}{BOX_V}  "
+                f"{right_btn[line_idx]}"
+            )
+
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # === Main box bottom border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
+
+    # === Navigation buttons (dimmed) ===
+    back_btn = _render_small_box("b", 8, highlight=False)
+    home_btn = _render_small_box("h", 8, highlight=False)
+
+    box_start = btn_width + 2
+    box_center = box_start + box_width // 2
+    nav_btn_width = 8
+    btn_gap = 4
+    nav_start = box_center - nav_btn_width - btn_gap // 2
+
+    for line_idx in range(3):
+        console.print(
+            f"{prefix}{' ' * nav_start}{back_btn[line_idx]}{' ' * btn_gap}{home_btn[line_idx]}"
+        )
+
     console.print()
 
     try:
-        console.print(f"{prefix}  [dim]Name:[/dim] ", end="")
+        console.print("  [dim]Enter name (or press Enter for default):[/dim] ", end="")
         response = input().strip()
         if response:
             return response
