@@ -722,8 +722,7 @@ def prompt_confirm(
 
         if slot_idx == 0:
             # First slot: Yes option
-            if btn_line == 0:
-                opt_box = _render_option_box("1. Yes - Confirm", box_width - 1)
+            opt_box = _render_option_box("1. Yes - Confirm", box_width - 1)
             console.print(
                 f"{prefix}{left_btn[btn_line]}  "
                 f"{opt_box[btn_line]}{BOX_V}  "
