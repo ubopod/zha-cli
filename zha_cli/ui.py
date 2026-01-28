@@ -187,13 +187,14 @@ def _render_menu_box(
 
     # === Option rows with side controls ===
     for i, opt in enumerate(visible_opts):
-        # Prepare the option box (3 lines) - width matches main box interior
+        # Prepare the option box (3 lines)
+        # Width is box_width - 1 because we add the right │ separately
         if opt is not None:
             opt_box = _render_option_box(
-                f"{scroll_offset + i + 1}. {opt}", box_width - 2
+                f"{scroll_offset + i + 1}. {opt}", box_width - 1
             )
         else:
-            opt_box = _render_empty_option_slot(box_width - 2)
+            opt_box = _render_empty_option_slot(box_width - 1)
 
         # Left buttons always visible (1, 2, 3), highlighted if option exists
         left_btn = _render_small_box(str(i + 1), btn_width, highlight=(opt is not None))
@@ -351,9 +352,10 @@ def _render_loading_box(message: str, spinner_char: str, box_width: int = 54) ->
             right_btn = [" " * btn_width] * 3
 
         # Content for middle slot (spinner), empty for others
+        # Width is box_width - 1 because we add the right │ separately
         if i == 1:
             # Spinner box merges with main box left border (matching option box layout)
-            slot_width = box_width - 2  # matches main box interior width
+            slot_width = box_width - 1
             right_padding = 4
             inner_box_width = slot_width - right_padding
             horiz_width = inner_box_width - 2
@@ -365,7 +367,7 @@ def _render_loading_box(message: str, spinner_char: str, box_width: int = 54) ->
                 f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_BR}[/dim]{' ' * right_padding}",
             ]
         else:
-            opt_lines = _render_empty_option_slot(box_width - 2)
+            opt_lines = _render_empty_option_slot(box_width - 1)
 
         # Option box includes left border (├/│) that merges with main box
         for line_idx in range(3):
@@ -547,15 +549,25 @@ def format_device_option(name: str, available: bool) -> str:
     return f"{status} {name}"
 
 
-def format_entity_option(name: str, is_on: bool | None) -> str:
-    """Format entity for menu display."""
+def format_entity_option(name: str | None, is_on: bool | None) -> str:
+    """Format entity control option for menu display.
+
+    Shows action-oriented text like "Turn off" or "Turn on".
+    If name is provided (for multi-entity devices), includes the entity name.
+    """
     if is_on is None:
-        status = "[dim]Unknown[/dim]"
+        action = "Toggle"
+        style = "dim"
     elif is_on:
-        status = "[green]ON[/green]"
+        action = "Turn off"
+        style = "green"
     else:
-        status = "[red]OFF[/red]"
-    return f"{name} {status}"
+        action = "Turn on"
+        style = "red"
+
+    if name:
+        return f"[{style}]{action}[/{style}] {name}"
+    return f"[{style}]{action}[/{style}]"
 
 
 def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -> bool:
@@ -609,7 +621,8 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
     right_btn_u = _render_small_box("u", btn_width, highlight=False)
 
     # Build message box that merges with main box
-    msg_width = box_width - 2
+    # Width is box_width - 1 because we add the right │ separately
+    msg_width = box_width - 1
     right_padding = 4
     inner_box_width = msg_width - right_padding
     horiz_width = inner_box_width - 2
@@ -633,7 +646,7 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
 
     # === Yes option (slot 2) ===
     left_btn_2 = _render_small_box("2", btn_width, highlight=True)
-    yes_box = _render_option_box("1. Yes", box_width - 2)
+    yes_box = _render_option_box("1. Yes", box_width - 1)
     empty_right = [" " * btn_width] * 3
 
     for line_idx in range(3):
@@ -645,7 +658,7 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
 
     # === No option (slot 3) ===
     left_btn_3 = _render_small_box("3", btn_width, highlight=True)
-    no_box = _render_option_box("2. No", box_width - 2)
+    no_box = _render_option_box("2. No", box_width - 1)
     right_btn_d = _render_small_box("d", btn_width, highlight=False)
 
     for line_idx in range(3):
@@ -844,7 +857,8 @@ def show_message(title: str, message: str, wait: bool = True) -> None:
             right_btn = [" " * btn_width] * 3
 
         # Build message box for this slot
-        msg_width = box_width - 2
+        # Width is box_width - 1 because we add the right │ separately
+        msg_width = box_width - 1
         right_padding = 4
         inner_box_width = msg_width - right_padding
         horiz_width = inner_box_width - 2
