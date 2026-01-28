@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-from typing import Any
+import select
+import sys
+from typing import Any, Callable
 
 from rich.console import Console
 
@@ -583,6 +585,127 @@ class LoadingSpinner:
 def spinner(message: str, status: str | None = None) -> LoadingSpinner:
     """Return an async spinner context manager for loading screens."""
     return LoadingSpinner(message, status)
+
+
+class LiveSensorMenu:
+    """Event-driven sensor menu with immediate updates."""
+
+    def __init__(
+        self,
+        title: str,
+        sensors: list[Any],
+        get_display_name: Callable[[Any], str],
+        format_state: Callable[[Any], str],
+    ):
+        self.title = title
+        self.sensors = sensors
+        self.get_display_name = get_display_name
+        self.format_state = format_state
+        self._scroll_offset = 0
+        self._running = False
+        self._needs_render = True
+        self._result = MENU_BACK
+        self._unsubscribers: list[Callable[[], None]] = []
+
+    def _on_state_changed(self, event: Any) -> None:
+        """Event callback - triggers immediate redraw."""
+        self._needs_render = True
+
+    def _build_options(self) -> list[str]:
+        """Build current sensor options from live state."""
+        options = []
+        for sensor in self.sensors:
+            name = self.get_display_name(sensor)
+            value = self.format_state(sensor)
+            options.append(format_sensor_option(name, value))
+        options.append("Refresh readings")
+        return options
+
+    async def _render_loop(self) -> None:
+        """Render when _needs_render is True."""
+        while self._running:
+            if self._needs_render:
+                self._needs_render = False
+                options = self._build_options()
+                _render_menu_box(
+                    self.title,
+                    options,
+                    self._scroll_offset,
+                    show_back=True,
+                    show_home=True,
+                )
+            await asyncio.sleep(0.05)  # 50ms check interval
+
+    async def _input_loop(self) -> None:
+        """Non-blocking input handling."""
+        while self._running:
+            # Use select() for non-blocking stdin
+            readable, _, _ = select.select([sys.stdin], [], [], 0.1)
+            if readable:
+                response = sys.stdin.readline().strip().lower()
+                await self._handle_input(response)
+
+    async def _handle_input(self, response: str) -> None:
+        """Process user input."""
+        if response == "b":
+            self._result = MENU_BACK
+            self._running = False
+        elif response == "h":
+            self._result = MENU_HOME
+            self._running = False
+        elif response == "u":
+            # Scroll up
+            if self._scroll_offset > 0:
+                self._scroll_offset = max(0, self._scroll_offset - VISIBLE_OPTIONS)
+                self._needs_render = True
+        elif response == "d":
+            # Scroll down
+            total = len(self.sensors) + 1  # +1 for refresh option
+            if self._scroll_offset + VISIBLE_OPTIONS < total:
+                self._scroll_offset += VISIBLE_OPTIONS
+                self._needs_render = True
+        elif response in ("1", "2", "3"):
+            # Selection (refresh is last option)
+            idx = self._scroll_offset + int(response) - 1
+            if idx == len(self.sensors):
+                # Refresh option selected - handled by caller
+                self._result = len(self.sensors) + 1
+                self._running = False
+            self._needs_render = True
+
+    async def run(self) -> int:
+        """Run the live menu. Returns choice."""
+        # Subscribe to STATE_CHANGED on all sensors
+        try:
+            from zha.const import STATE_CHANGED
+        except ImportError:
+            STATE_CHANGED = "state_changed"
+
+        for sensor in self.sensors:
+            if hasattr(sensor, "on_event"):
+                unsub = sensor.on_event(STATE_CHANGED, self._on_state_changed)
+                self._unsubscribers.append(unsub)
+
+        self._running = True
+        self._needs_render = True
+
+        render_task = asyncio.create_task(self._render_loop())
+        input_task = asyncio.create_task(self._input_loop())
+
+        try:
+            await input_task
+        finally:
+            self._running = False
+            render_task.cancel()
+            try:
+                await render_task
+            except asyncio.CancelledError:
+                pass
+            # Unsubscribe from all events
+            for unsub in self._unsubscribers:
+                unsub()
+
+        return self._result
 
 
 def _format_entity_state(entity: dict[str, Any]) -> str:

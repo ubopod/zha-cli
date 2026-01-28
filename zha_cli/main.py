@@ -873,50 +873,37 @@ class ZHACli:
         return True
 
     async def _view_sensors(self, device: Any, device_name: str) -> None:
-        """View sensor values for a device."""
-        # Get sensors once at start
+        """View sensor values with event-driven live updates."""
         sensors = DeviceController.get_monitorable_entities(device)
 
         if not sensors:
             ui.show_message(f"◆ {device_name}", "No sensors available")
             return
 
-        # Refresh all sensors on entry
+        # Refresh on entry
         async with ui.spinner(f"◆ {device_name}", status="Reading sensors..."):
             for sensor in sensors:
                 await DeviceController.refresh_entity(sensor)
 
         while self._running:
-            # Build options showing sensor names and values
-            options: list[str] = []
-            for sensor in sensors:
-                info = DeviceController.get_entity_info(sensor)
-                sensor_name = info.get("display_name", "Unknown")
-                value = DeviceController.format_entity_state(sensor)
-                options.append(ui.format_sensor_option(sensor_name, value))
-
-            # Add refresh option
-            refresh_idx = len(options) + 1
-            options.append("Refresh readings")
-
-            choice = ui.prompt_menu(
-                f"◆ {device_name} Sensors", options, show_back=True, show_home=True
+            menu = ui.LiveSensorMenu(
+                f"◆ {device_name} Sensors",
+                sensors,
+                DeviceController.get_display_name,
+                DeviceController.format_entity_state,
             )
+            choice = await menu.run()
 
             if choice in (0, MENU_BACK):
                 return
             if choice == MENU_HOME:
                 self._running = False
                 return
-
-            # Refresh readings on explicit request
-            if choice == refresh_idx:
-                async with ui.spinner(
-                    f"◆ {device_name}", status="Refreshing sensors..."
-                ):
+            if choice == len(sensors) + 1:
+                # Manual refresh
+                async with ui.spinner(f"◆ {device_name}", status="Refreshing..."):
                     for sensor in sensors:
                         await DeviceController.refresh_entity(sensor)
-            # Loop back to show updated values
 
 
 def setup_logging(verbose: bool = False) -> None:
