@@ -179,6 +179,8 @@ class ZHACli:
 
         retry_idx = len(options)
         options.append("Retry detection")
+        backups_idx = len(options)
+        options.append("Manage backups")
         settings_idx = len(options)
         options.append("Settings")
 
@@ -196,6 +198,9 @@ class ZHACli:
             return "selected"
         elif choice == retry_idx + 1:
             return "retry"
+        elif choice == backups_idx + 1:
+            await self._global_backup_menu()
+            return "settings"
         elif choice == settings_idx + 1:
             await self._settings_menu()
             return "settings"
@@ -244,6 +249,54 @@ class ZHACli:
 
         deleted = self._network_manager.delete_all_networks()
         ui.show_message("Success", f"Deleted {deleted} saved network(s)")
+
+    async def _global_backup_menu(self) -> None:
+        """Display backup management menu showing all coordinators."""
+        # Filter to coordinators with saved networks (those can have backups)
+        coordinators_with_networks = [
+            coord
+            for coord in self._detected_coordinators
+            if self._network_manager.has_existing_network(coord)
+        ]
+
+        if not coordinators_with_networks:
+            ui.show_message("Info", "No saved networks with backups")
+            return
+
+        current_coord = self._network_manager.coordinator
+
+        while True:
+            # Build options with backup counts where available
+            options: list[str] = []
+            for coord in coordinators_with_networks:
+                name = self._network_manager.get_coordinator_name(coord.port)
+                display_name = name or coord.port
+
+                # Show backup count if this is the connected coordinator
+                if current_coord and coord.port == current_coord.port:
+                    backup_count = len(self._network_manager.get_backups())
+                    options.append(f"{display_name} ({backup_count} backups)")
+                else:
+                    options.append(f"{display_name} (saved)")
+
+            choice = ui.prompt_menu(
+                "◆ Manage Backups", options, show_back=True, show_home=True
+            )
+
+            if choice in (0, MENU_BACK):
+                return
+            if choice == MENU_HOME:
+                self._running = False
+                return
+
+            # Connect to selected coordinator and show its backups
+            selected = coordinators_with_networks[choice - 1]
+            if current_coord is None or selected.port != current_coord.port:
+                if not await self._ensure_network_started(selected):
+                    continue
+                current_coord = self._network_manager.coordinator
+
+            await self._backup_menu()
 
     async def _ensure_network_started(self, coordinator: DetectedCoordinator) -> bool:
         """Ensure the network is started, auto-starting if needed.
@@ -311,8 +364,8 @@ class ZHACli:
         options.append("Rename coordinator")
         reset_idx = len(options)
         options.append("Reset network")
-        backups_idx = len(options)
-        options.append("Manage backups")
+        backup_idx = len(options)
+        options.append("Create new backup")
 
         title = "◆ Zigbee"
         choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
@@ -331,8 +384,9 @@ class ZHACli:
             await self._rename_coordinator()
         elif choice == reset_idx + 1:
             await self._reset_network()
-        elif choice == backups_idx + 1:
-            await self._backup_menu()
+        elif choice == backup_idx + 1:
+            async with ui.spinner("◆ Zigbee", status="Creating backup..."):
+                await self._network_manager.create_backup()
 
     async def _reset_network(self) -> None:
         """Reset the network completely, deleting all paired devices."""
