@@ -138,8 +138,8 @@ class DeviceController:
             Human-readable display name.
 
         """
-        # 1. Use fallback_name if available
-        if entity.fallback_name:
+        # 1. Use fallback_name if available and not "None"
+        if entity.fallback_name and entity.fallback_name != "None":
             return entity.fallback_name
 
         # 2. Use device_class if available (title-cased)
