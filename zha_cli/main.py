@@ -873,7 +873,7 @@ class ZHACli:
         return True
 
     async def _view_sensors(self, device: Any, device_name: str) -> None:
-        """View sensor values for a device with live updates."""
+        """View sensor values for a device."""
         # Get sensors once at start
         sensors = DeviceController.get_monitorable_entities(device)
 
@@ -886,17 +886,37 @@ class ZHACli:
             for sensor in sensors:
                 await DeviceController.refresh_entity(sensor)
 
-        # Run live sensor view
-        live_view = ui.live_sensor_view(
-            f"◆ {device_name} Sensors",
-            sensors,
-            DeviceController.get_display_name,
-            DeviceController.format_entity_state,
-        )
-        result = await live_view.run()
+        while self._running:
+            # Build options showing sensor names and values
+            options: list[str] = []
+            for sensor in sensors:
+                info = DeviceController.get_entity_info(sensor)
+                sensor_name = info.get("display_name", "Unknown")
+                value = DeviceController.format_entity_state(sensor)
+                options.append(ui.format_sensor_option(sensor_name, value))
 
-        if result == ui.MENU_HOME:
-            self._running = False
+            # Add refresh option
+            refresh_idx = len(options) + 1
+            options.append("Refresh readings")
+
+            choice = ui.prompt_menu(
+                f"◆ {device_name} Sensors", options, show_back=True, show_home=True
+            )
+
+            if choice in (0, MENU_BACK):
+                return
+            if choice == MENU_HOME:
+                self._running = False
+                return
+
+            # Refresh readings on explicit request
+            if choice == refresh_idx:
+                async with ui.spinner(
+                    f"◆ {device_name}", status="Refreshing sensors..."
+                ):
+                    for sensor in sensors:
+                        await DeviceController.refresh_entity(sensor)
+            # Loop back to show updated values
 
 
 def setup_logging(verbose: bool = False) -> None:
