@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 from typing import Any
 
 from rich.console import Console
+
+_LOGGER = logging.getLogger(__name__)
 
 console = Console()
 
@@ -1035,6 +1038,7 @@ class LiveSensorView:
 
     def _on_state_changed(self, event: Any) -> None:
         """Handle sensor state change event."""
+        _LOGGER.debug("STATE_CHANGED event received: %s", event)
         self._needs_render = True
 
     async def _render_loop(self) -> None:
@@ -1111,10 +1115,17 @@ class LiveSensorView:
         except ImportError:
             STATE_CHANGED = "state_changed"
 
+        _LOGGER.debug(
+            "Subscribing to %d sensors for STATE_CHANGED events", len(self.sensors)
+        )
         for sensor in self.sensors:
+            sensor_name = self.get_display_name(sensor)
             if hasattr(sensor, "on_event"):
                 unsub = sensor.on_event(STATE_CHANGED, self._on_state_changed)
                 self._unsubscribe_handlers.append(unsub)
+                _LOGGER.debug("  Subscribed to sensor: %s (has on_event)", sensor_name)
+            else:
+                _LOGGER.debug("  Sensor %s has no on_event method", sensor_name)
 
         self._running = True
         self._needs_render = True

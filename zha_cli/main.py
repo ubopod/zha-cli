@@ -548,7 +548,7 @@ class ZHACli:
         duration = 30 if choice == 1 else 60
 
         if self._pairing_manager is None:
-            ui.show_message("◆ Error", "Pairing manager not initialized")
+            ui.show_message("Error", "Pairing manager not initialized")
             return
 
         pairing_manager = self._pairing_manager
@@ -599,7 +599,7 @@ class ZHACli:
                 await self._prompt_device_name(device)
 
         except Exception as exc:
-            ui.show_message("◆ Error", f"Pairing failed: {exc}")
+            ui.show_message("Error", f"Pairing failed: {exc}")
             _LOGGER.exception("Pairing failed")
 
     async def _prompt_device_name(self, device_info: dict[str, Any]) -> None:
