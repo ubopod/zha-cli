@@ -338,44 +338,35 @@ def _render_loading_box(message: str, spinner_char: str, box_width: int = 54) ->
     # === Empty row for spacing ===
     console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
 
-    # === Three option slot rows with dimmed side buttons ===
-    for i in range(VISIBLE_OPTIONS):
-        # Dimmed numbered buttons on left
-        left_btn = _render_small_box(str(i + 1), btn_width, highlight=False)
+    # === Content area with centered spinner (no item borders) ===
+    # 9 lines total for the 3 option slot area
+    inner_width = box_width - 2
+    for line_num in range(9):
+        # Dimmed side buttons
+        slot_idx = line_num // 3
+        left_btn = _render_small_box(str(slot_idx + 1), btn_width, highlight=False)
 
-        # Dimmed u/d buttons on right
-        if i == 0:
+        if slot_idx == 0:
             right_btn = _render_small_box("u", btn_width, highlight=False)
-        elif i == 2:
+        elif slot_idx == 2:
             right_btn = _render_small_box("d", btn_width, highlight=False)
         else:
             right_btn = [" " * btn_width] * 3
 
-        # Content for middle slot (spinner), empty for others
-        # Width is box_width - 1 because we add the right │ separately
-        if i == 1:
-            # Spinner box merges with main box left border (matching option box layout)
-            slot_width = box_width - 1
-            right_padding = 4
-            inner_box_width = slot_width - right_padding
-            horiz_width = inner_box_width - 2
-            spinner_text = spinner_char.center(horiz_width)
-            # Use T-junctions on left to merge with main box
-            opt_lines = [
-                f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_TR}[/dim]{' ' * right_padding}",
-                f"[dim]{BOX_V}[/dim][bold yellow]{spinner_text}[/bold yellow][dim]{BOX_V}[/dim]{' ' * right_padding}",
-                f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_BR}[/dim]{' ' * right_padding}",
-            ]
-        else:
-            opt_lines = _render_empty_option_slot(box_width - 1)
+        btn_line = line_num % 3
 
-        # Option box includes left border (├/│) that merges with main box
-        for line_idx in range(3):
-            console.print(
-                f"{prefix}{left_btn[line_idx]}  "
-                f"{opt_lines[line_idx]}{BOX_V}  "
-                f"{right_btn[line_idx]}"
-            )
+        # Center line (line 4 of 9) shows spinner
+        if line_num == 4:
+            padding = (inner_width - 1) // 2
+            content = f"{' ' * padding}[bold yellow]{spinner_char}[/bold yellow]{' ' * (inner_width - padding - 1)}"
+        else:
+            content = " " * inner_width
+
+        console.print(
+            f"{prefix}{left_btn[btn_line]}  "
+            f"{BOX_V}{content}{BOX_V}  "
+            f"{right_btn[btn_line]}"
+        )
 
     # === Empty row for spacing ===
     console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
@@ -583,6 +574,7 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
     clear_screen()
     prefix = " " * left_margin
     btn_spacer = " " * btn_width
+    inner_width = box_width - 2
 
     console.print("\n" * top_margin, end="")
 
@@ -599,15 +591,15 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
     console.print(f"{prefix}{btn_spacer}  {BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
 
     # === Empty row for spacing ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * inner_width}{BOX_V}")
 
-    # === Message row (slot 1 position) - word wrap ===
-    inner_width = box_width - 6
+    # Word wrap message
+    text_width = inner_width - 4
     words = message.split()
     lines: list[str] = []
     current = ""
     for word in words:
-        if len(current) + len(word) + 1 <= inner_width:
+        if len(current) + len(word) + 1 <= text_width:
             current = f"{current} {word}".strip()
         else:
             if current:
@@ -616,66 +608,64 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
     if current:
         lines.append(current)
 
-    # Show message in first option slot area (with dimmed buttons)
-    left_btn_1 = _render_small_box("1", btn_width, highlight=False)
-    right_btn_u = _render_small_box("u", btn_width, highlight=False)
+    # === Content area: message text + Yes option ===
+    for line_num in range(9):
+        slot_idx = line_num // 3
+        btn_line = line_num % 3
 
-    # Build message box that merges with main box
-    # Width is box_width - 1 because we add the right │ separately
-    msg_width = box_width - 1
-    right_padding = 4
-    inner_box_width = msg_width - right_padding
-    horiz_width = inner_box_width - 2
-
-    # Pad/truncate message lines
-    msg_line_1 = (lines[0] if lines else "").center(horiz_width - 2)
-    msg_line_2 = (lines[1] if len(lines) > 1 else "").center(horiz_width - 2)
-
-    msg_box = [
-        f"{BOX_LT}{BOX_H * horiz_width}{BOX_TR}{' ' * right_padding}",
-        f"{BOX_V} {msg_line_1} {BOX_V}{' ' * right_padding}",
-        f"{BOX_V} {msg_line_2} {BOX_V}{' ' * right_padding}",
-    ]
-
-    for line_idx in range(3):
-        console.print(
-            f"{prefix}{left_btn_1[line_idx]}  "
-            f"{msg_box[line_idx]}{BOX_V}  "
-            f"{right_btn_u[line_idx]}"
+        # Side buttons (dimmed except slot 1 which has Yes)
+        left_btn = _render_small_box(
+            str(slot_idx + 1), btn_width, highlight=(slot_idx == 0)
         )
 
-    # === Yes option (slot 2) ===
-    left_btn_2 = _render_small_box("2", btn_width, highlight=True)
-    yes_box = _render_option_box("1. Yes", box_width - 1)
-    empty_right = [" " * btn_width] * 3
+        if slot_idx == 0:
+            right_btn = _render_small_box("u", btn_width, highlight=False)
+        elif slot_idx == 2:
+            right_btn = _render_small_box("d", btn_width, highlight=False)
+        else:
+            right_btn = [" " * btn_width] * 3
 
-    for line_idx in range(3):
-        console.print(
-            f"{prefix}{left_btn_2[line_idx]}  "
-            f"{yes_box[line_idx]}{BOX_V}  "
-            f"{empty_right[line_idx]}"
-        )
-
-    # === No option (slot 3) ===
-    left_btn_3 = _render_small_box("3", btn_width, highlight=True)
-    no_box = _render_option_box("2. No", box_width - 1)
-    right_btn_d = _render_small_box("d", btn_width, highlight=False)
-
-    for line_idx in range(3):
-        console.print(
-            f"{prefix}{left_btn_3[line_idx]}  "
-            f"{no_box[line_idx]}{BOX_V}  "
-            f"{right_btn_d[line_idx]}"
-        )
+        if slot_idx == 0:
+            # First slot: Yes option
+            if btn_line == 0:
+                opt_box = _render_option_box("1. Yes - Confirm", box_width - 1)
+            console.print(
+                f"{prefix}{left_btn[btn_line]}  "
+                f"{opt_box[btn_line]}{BOX_V}  "
+                f"{right_btn[btn_line]}"
+            )
+        elif slot_idx == 1:
+            # Second slot: message text (centered)
+            msg_line = lines[btn_line] if btn_line < len(lines) else ""
+            content = msg_line.center(inner_width)
+            console.print(
+                f"{prefix}{left_btn[btn_line]}  "
+                f"{BOX_V}{content}{BOX_V}  "
+                f"{right_btn[btn_line]}"
+            )
+        else:
+            # Third slot: cancel hint
+            if btn_line == 1:
+                hint = "[dim]Press b to cancel[/dim]".center(
+                    inner_width + 13
+                )  # +13 for markup
+                content = hint
+            else:
+                content = " " * inner_width
+            console.print(
+                f"{prefix}{left_btn[btn_line]}  "
+                f"{BOX_V}{content}{BOX_V}  "
+                f"{right_btn[btn_line]}"
+            )
 
     # === Empty row for spacing ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * inner_width}{BOX_V}")
 
     # === Main box bottom border ===
     console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
 
-    # === Navigation buttons (dimmed) ===
-    back_btn = _render_small_box("b", 8, highlight=False)
+    # === Navigation buttons (back highlighted for cancel) ===
+    back_btn = _render_small_box("b", 8, highlight=True)
     home_btn = _render_small_box("h", 8, highlight=False)
 
     box_start = btn_width + 2
@@ -694,11 +684,9 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
     try:
         console.print("  [dim]Enter choice:[/dim] ", end="")
         response = input().strip().lower()
-        if not response:
-            return default
         if response in ("1", "y", "yes"):
             return True
-        if response in ("2", "n", "no"):
+        if response in ("b", "n", "no"):
             return False
         return default
     except (KeyboardInterrupt, EOFError):
@@ -774,7 +762,7 @@ def prompt_device_name(
     # === Empty row for spacing ===
     console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
 
-    # Build info lines for the 3 slots
+    # Build info lines for display
     info_lines: list[str] = []
     if manufacturer:
         info_lines.append(f"Manufacturer: {manufacturer}")
@@ -783,44 +771,34 @@ def prompt_device_name(
     if default:
         info_lines.append(f"Default: {default}")
 
-    # Pad to 3 lines
-    while len(info_lines) < 3:
-        info_lines.append("")
+    inner_width = box_width - 2
 
-    # === Three option slot rows with dimmed buttons ===
-    for i in range(VISIBLE_OPTIONS):
-        left_btn = _render_small_box(str(i + 1), btn_width, highlight=False)
+    # === Content area with plain text (no item borders) ===
+    for line_num in range(9):
+        slot_idx = line_num // 3
+        btn_line = line_num % 3
 
-        if i == 0:
+        # Dimmed side buttons
+        left_btn = _render_small_box(str(slot_idx + 1), btn_width, highlight=False)
+
+        if slot_idx == 0:
             right_btn = _render_small_box("u", btn_width, highlight=False)
-        elif i == 2:
+        elif slot_idx == 2:
             right_btn = _render_small_box("d", btn_width, highlight=False)
         else:
             right_btn = [" " * btn_width] * 3
 
-        # Build info box for this slot
-        # Width is box_width - 1 because we add the right │ separately
-        msg_width = box_width - 1
-        right_padding = 4
-        inner_box_width = msg_width - right_padding
-        horiz_width = inner_box_width - 2
+        # Info text centered in the middle area
+        if line_num < len(info_lines):
+            content = info_lines[line_num].center(inner_width)
+        else:
+            content = " " * inner_width
 
-        # Get info line for this slot
-        info_text = info_lines[i][: horiz_width - 2] if info_lines[i] else ""
-        msg_line = info_text.ljust(horiz_width - 2)
-
-        msg_box = [
-            f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_TR}[/dim]{' ' * right_padding}",
-            f"[dim]{BOX_V}[/dim] {msg_line} [dim]{BOX_V}[/dim]{' ' * right_padding}",
-            f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_BR}[/dim]{' ' * right_padding}",
-        ]
-
-        for line_idx in range(3):
-            console.print(
-                f"{prefix}{left_btn[line_idx]}  "
-                f"{msg_box[line_idx]}{BOX_V}  "
-                f"{right_btn[line_idx]}"
-            )
+        console.print(
+            f"{prefix}{left_btn[btn_line]}  "
+            f"{BOX_V}{content}{BOX_V}  "
+            f"{right_btn[btn_line]}"
+        )
 
     # === Empty row for spacing ===
     console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
@@ -856,7 +834,7 @@ def prompt_device_name(
 
 
 def show_message(title: str, message: str, wait: bool = True) -> None:
-    """Show a message using the standard menu layout."""
+    """Show a message using the standard menu layout with plain text content."""
     box_width = 54
     btn_width = 5
 
@@ -868,6 +846,7 @@ def show_message(title: str, message: str, wait: bool = True) -> None:
     clear_screen()
     prefix = " " * left_margin
     btn_spacer = " " * btn_width
+    inner_width = box_width - 2
 
     console.print("\n" * top_margin, end="")
 
@@ -884,15 +863,15 @@ def show_message(title: str, message: str, wait: bool = True) -> None:
     console.print(f"{prefix}{btn_spacer}  {BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
 
     # === Empty row for spacing ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * inner_width}{BOX_V}")
 
     # Word wrap message
-    inner_width = box_width - 10  # Account for box padding
+    text_width = inner_width - 4
     words = message.split()
     lines: list[str] = []
     current = ""
     for word in words:
-        if len(current) + len(word) + 1 <= inner_width:
+        if len(current) + len(word) + 1 <= text_width:
             current = f"{current} {word}".strip()
         else:
             if current:
@@ -901,42 +880,35 @@ def show_message(title: str, message: str, wait: bool = True) -> None:
     if current:
         lines.append(current)
 
-    # === Three option slot rows with dimmed buttons ===
-    for i in range(VISIBLE_OPTIONS):
-        left_btn = _render_small_box(str(i + 1), btn_width, highlight=False)
+    # === Content area with plain text (no item borders) ===
+    for line_num in range(9):
+        slot_idx = line_num // 3
+        btn_line = line_num % 3
 
-        if i == 0:
+        # Dimmed side buttons
+        left_btn = _render_small_box(str(slot_idx + 1), btn_width, highlight=False)
+
+        if slot_idx == 0:
             right_btn = _render_small_box("u", btn_width, highlight=False)
-        elif i == 2:
+        elif slot_idx == 2:
             right_btn = _render_small_box("d", btn_width, highlight=False)
         else:
             right_btn = [" " * btn_width] * 3
 
-        # Build message box for this slot
-        # Width is box_width - 1 because we add the right │ separately
-        msg_width = box_width - 1
-        right_padding = 4
-        inner_box_width = msg_width - right_padding
-        horiz_width = inner_box_width - 2
+        # Message text centered in the middle area
+        if line_num < len(lines):
+            content = lines[line_num].center(inner_width)
+        else:
+            content = " " * inner_width
 
-        # Get message line for this slot (centered)
-        msg_line = (lines[i] if i < len(lines) else "").center(horiz_width - 2)
-
-        msg_box = [
-            f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_TR}[/dim]{' ' * right_padding}",
-            f"[dim]{BOX_V}[/dim] {msg_line} [dim]{BOX_V}[/dim]{' ' * right_padding}",
-            f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_BR}[/dim]{' ' * right_padding}",
-        ]
-
-        for line_idx in range(3):
-            console.print(
-                f"{prefix}{left_btn[line_idx]}  "
-                f"{msg_box[line_idx]}{BOX_V}  "
-                f"{right_btn[line_idx]}"
-            )
+        console.print(
+            f"{prefix}{left_btn[btn_line]}  "
+            f"{BOX_V}{content}{BOX_V}  "
+            f"{right_btn[btn_line]}"
+        )
 
     # === Empty row for spacing ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * inner_width}{BOX_V}")
 
     # === Main box bottom border ===
     console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
