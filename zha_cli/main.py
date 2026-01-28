@@ -30,6 +30,21 @@ class ZHACli:
         self._detected_coordinators: list[DetectedCoordinator] = []
         self._running = True
 
+    def _get_coordinator_status(self, coord: DetectedCoordinator) -> str:
+        """Get the status of a coordinator.
+
+        Returns:
+            "connected" if currently connected
+            "saved" if has existing network
+            "new" if no network exists
+        """
+        current_coord = self._network_manager.coordinator
+        if current_coord is not None and coord.port == current_coord.port:
+            return "connected"
+        if self._network_manager.has_existing_network(coord):
+            return "saved"
+        return "new"
+
     async def run(self) -> None:
         """Run the main CLI loop."""
         # Set up signal handlers
@@ -161,19 +176,7 @@ class ZHACli:
         # Build options with network status indicators and names
         options = []
         for coord in self._detected_coordinators:
-            is_connected = (
-                current_coord is not None and coord.port == current_coord.port
-            )
-            has_network = self._network_manager.has_existing_network(coord)
-
-            if is_connected:
-                status = "connected"
-            elif has_network:
-                status = "saved"
-            else:
-                status = "new"
-
-            # Get custom name if available
+            status = self._get_coordinator_status(coord)
             name = self._network_manager.get_coordinator_name(coord.port)
             options.append(ui.format_coordinator_option(coord.port, status, name))
 
@@ -265,7 +268,7 @@ class ZHACli:
 
         current_coord = self._network_manager.coordinator
 
-        while True:
+        while self._running:
             # Build options with backup counts where available
             options: list[str] = []
             for coord in coordinators_with_networks:
@@ -388,8 +391,12 @@ class ZHACli:
         elif choice == reset_idx + 1:
             await self._reset_network()
         elif choice == backup_idx + 1:
-            async with ui.spinner("◆ Zigbee", status="Updating backup..."):
-                await self._network_manager.create_backup()
+            try:
+                async with ui.spinner("◆ Zigbee", status="Updating backup..."):
+                    await self._network_manager.create_backup()
+            except Exception as exc:
+                ui.show_message("Error", f"Backup failed: {exc}")
+                _LOGGER.exception("Backup failed")
         elif choice == delete_backup_idx + 1:
             backups = self._network_manager.get_backups()
             if not backups:
@@ -399,8 +406,12 @@ class ZHACli:
                 if confirm is None:
                     self._running = False
                     return
-                elif confirm:
-                    await self._network_manager.delete_backup(0)
+                if confirm:
+                    try:
+                        await self._network_manager.delete_backup(0)
+                    except Exception as exc:
+                        ui.show_message("Error", f"Delete failed: {exc}")
+                        _LOGGER.exception("Backup delete failed")
 
     async def _reset_network(self) -> None:
         """Reset the network completely, deleting all paired devices."""
@@ -448,8 +459,12 @@ class ZHACli:
 
             if choice == len(backups) + 1:
                 # Create backup
-                async with ui.spinner("◆ Backups", status="Creating backup..."):
-                    await self._network_manager.create_backup()
+                try:
+                    async with ui.spinner("◆ Backups", status="Creating backup..."):
+                        await self._network_manager.create_backup()
+                except Exception as exc:
+                    ui.show_message("Error", f"Backup failed: {exc}")
+                    _LOGGER.exception("Backup failed")
             else:
                 # Selected a backup - show detail menu
                 await self._backup_detail_menu(backups[choice - 1])
@@ -478,8 +493,12 @@ class ZHACli:
                 self._running = False
                 return
             if confirm:
-                async with ui.spinner("◆ Backups", status="Restoring..."):
-                    await self._network_manager.restore_backup(backup["index"])
+                try:
+                    async with ui.spinner("◆ Backups", status="Restoring..."):
+                        await self._network_manager.restore_backup(backup["index"])
+                except Exception as exc:
+                    ui.show_message("Error", f"Restore failed: {exc}")
+                    _LOGGER.exception("Backup restore failed")
         elif choice == 2:
             # Delete
             confirm = ui.prompt_confirm("Delete this backup?", default=False)
@@ -487,7 +506,11 @@ class ZHACli:
                 self._running = False
                 return
             if confirm:
-                await self._network_manager.delete_backup(backup["index"])
+                try:
+                    await self._network_manager.delete_backup(backup["index"])
+                except Exception as exc:
+                    ui.show_message("Error", f"Delete failed: {exc}")
+                    _LOGGER.exception("Backup delete failed")
 
     async def _rename_coordinator(self) -> None:
         """Rename the current coordinator."""
@@ -710,9 +733,12 @@ class ZHACli:
         if fresh_info:
             all_entities = DeviceController.get_all_entities(fresh_info["device"])
             if all_entities:
-                async with ui.spinner(f"◆ {name}", status="Reading device..."):
-                    for entity in all_entities:
-                        await DeviceController.refresh_entity(entity)
+                try:
+                    async with ui.spinner(f"◆ {name}", status="Reading device..."):
+                        for entity in all_entities:
+                            await DeviceController.refresh_entity(entity)
+                except Exception as exc:
+                    _LOGGER.warning("Failed to refresh entities: %s", exc)
 
         while True:
             # Fetch fresh device reference to ensure entities are current
@@ -830,14 +856,19 @@ class ZHACli:
         if not confirm:
             return False
 
-        async with ui.spinner("◆ Zigbee", status="Removing device...") as spin:
-            success = await self._network_manager.remove_device(ieee)
-            if success:
-                spin.set_status("Device removed")
-                await asyncio.sleep(0.5)
-            else:
-                ui.show_message("Error", "Failed to remove device")
-                return False
+        try:
+            async with ui.spinner("◆ Zigbee", status="Removing device...") as spin:
+                success = await self._network_manager.remove_device(ieee)
+                if success:
+                    spin.set_status("Device removed")
+                    await asyncio.sleep(0.5)
+                else:
+                    ui.show_message("Error", "Failed to remove device")
+                    return False
+        except Exception as exc:
+            ui.show_message("Error", f"Remove failed: {exc}")
+            _LOGGER.exception("Device removal failed")
+            return False
 
         return True
 
