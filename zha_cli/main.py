@@ -565,9 +565,7 @@ class ZHACli:
                 is_on = state.get("state") if "state" in state else state.get("on")
                 entity_name = None
                 if show_entity_names:
-                    entity_name = info.get("fallback_name") or info.get(
-                        "unique_id", "Unknown"
-                    )
+                    entity_name = info.get("display_name", "Unknown")
                 options.append(ui.format_entity_option(entity_name, is_on))
 
             # Add sensors option if there are monitorable entities
@@ -633,9 +631,7 @@ class ZHACli:
             options: list[str] = []
             for sensor in sensors:
                 info = DeviceController.get_entity_info(sensor)
-                sensor_name = info.get("fallback_name") or info.get(
-                    "unique_id", "Unknown"
-                )
+                sensor_name = info.get("display_name", "Unknown")
                 value = DeviceController.format_entity_state(sensor)
                 options.append(ui.format_sensor_option(sensor_name, value))
 

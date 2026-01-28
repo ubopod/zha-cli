@@ -125,6 +125,39 @@ class DeviceController:
         return str(state)
 
     @staticmethod
+    def get_display_name(entity: PlatformEntity) -> str:
+        """Get a user-friendly display name for an entity.
+
+        Uses fallback_name if available, otherwise generates a name from
+        device_class or platform type.
+
+        Args:
+            entity: The entity to get a name for.
+
+        Returns:
+            Human-readable display name.
+
+        """
+        # 1. Use fallback_name if available
+        if entity.fallback_name:
+            return entity.fallback_name
+
+        # 2. Use device_class if available (title-cased)
+        device_class = getattr(entity, "device_class", None)
+        if device_class:
+            # Handle enum values or strings
+            class_name = (
+                device_class.value if hasattr(device_class, "value") else str(device_class)
+            )
+            return class_name.replace("_", " ").title()
+
+        # 3. Fall back to platform type
+        platform = entity.PLATFORM
+        if hasattr(platform, "value"):
+            return platform.value.replace("_", " ").title()
+        return str(platform).title()
+
+    @staticmethod
     async def turn_on(entity: PlatformEntity) -> None:
         """Turn on an entity.
 
@@ -186,6 +219,7 @@ class DeviceController:
             "unique_id": entity.unique_id,
             "platform": entity.PLATFORM,
             "fallback_name": entity.fallback_name,
+            "display_name": DeviceController.get_display_name(entity),
             "state": entity.state,
             "available": getattr(entity, "available", True),
         }
