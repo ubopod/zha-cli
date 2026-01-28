@@ -90,11 +90,6 @@ class NetworkManager:
         except OSError as exc:
             _LOGGER.warning("Failed to save device names: %s", exc)
 
-    def get_device_name(self, ieee: str) -> str | None:
-        """Get the custom name for a device by IEEE address."""
-        names = self._load_device_names()
-        return names.get(str(ieee))
-
     def set_device_name(self, ieee: str, name: str) -> None:
         """Set a custom name for a device."""
         names = self._load_device_names()

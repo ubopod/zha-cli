@@ -50,7 +50,6 @@ class ZHACli:
 
     async def _coordinator_entry_flow(self) -> None:
         """Handle coordinator detection and selection on entry."""
-        previous_count = len(self._detected_coordinators)
         auto_restored = False
         selection_complete = False
 
@@ -61,12 +60,7 @@ class ZHACli:
                 await self._detect_coordinators_with_spinner()
 
             if not self._detected_coordinators:
-                # Check if this was a retry that found nothing new
-                if previous_count == 0:
-                    title = "◆ No Coordinators Found"
-                else:
-                    title = "◆ No Coordinators Found"
-
+                title = "◆ No Coordinators Found"
                 options = ["Retry detection", "Settings"]
                 choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
                 if choice in (0, MENU_BACK, MENU_HOME):
@@ -75,7 +69,6 @@ class ZHACli:
                 elif choice == 2:
                     await self._settings_menu()
                 # choice == 1 means retry, loop continues
-                previous_count = 0
             else:
                 # Auto-restore network if exactly one coordinator has existing network
                 if not auto_restored:
@@ -102,7 +95,6 @@ class ZHACli:
                 result = await self._select_coordinator_menu()
                 if result == "retry":
                     # Clear coordinators to trigger re-detection
-                    previous_count = len(self._detected_coordinators)
                     self._detected_coordinators = []
                     continue
                 elif result == "settings":

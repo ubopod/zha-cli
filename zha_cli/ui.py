@@ -5,13 +5,9 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from rich.console import Console
-from rich.table import Table
-
-if TYPE_CHECKING:
-    from zha_cli.coordinator_probe import DetectedCoordinator
 
 console = Console()
 
@@ -33,6 +29,12 @@ BOX_V = "│"  # Vertical
 BOX_LT = "├"  # Left T
 BOX_RT = "┤"  # Right T
 
+# Layout dimensions
+BOX_WIDTH = 54
+BTN_WIDTH = 5
+NAV_BTN_WIDTH = 8
+NAV_BTN_GAP = 4
+
 
 def clear_screen() -> None:
     """Clear the terminal screen."""
@@ -51,11 +53,6 @@ def _strip_rich_markup(text: str) -> str:
     # Then convert Rich escape sequences: \[ -> [ (backslash-bracket displays as bracket)
     stripped = stripped.replace("\\[", "[")
     return stripped
-
-
-def _visible_len(text: str) -> int:
-    """Get the visible length of text (excluding Rich markup)."""
-    return len(_strip_rich_markup(text))
 
 
 def _fit_text(text: str, width: int) -> str:
@@ -78,6 +75,117 @@ def _get_terminal_size() -> tuple[int, int]:
         return size.columns, size.lines
     except OSError:
         return 80, 24
+
+
+def _word_wrap(text: str, width: int) -> list[str]:
+    """Wrap text to fit within the specified width."""
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        if len(current) + len(word) + 1 <= width:
+            current = f"{current} {word}".strip()
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _render_text_dialog(
+    title: str,
+    content_lines: list[str],
+    back_highlight: bool = False,
+) -> None:
+    """Render a dialog box with plain text content.
+
+    This is a shared helper for dialogs that display simple text content
+    in the 9-line content area (3 slots x 3 lines each).
+
+    Args:
+        title: The dialog title.
+        content_lines: Up to 9 lines of text content to display (centered).
+        back_highlight: Whether to highlight the back button.
+    """
+    box_width = BOX_WIDTH
+    btn_width = BTN_WIDTH
+
+    term_width, term_height = _get_terminal_size()
+    total_width = btn_width + 2 + box_width + 2 + btn_width
+    left_margin = max(0, (term_width - total_width) // 2)
+    top_margin = max(0, (term_height - 20) // 2)
+
+    clear_screen()
+    prefix = " " * left_margin
+    btn_spacer = " " * btn_width
+    inner_width = box_width - 2
+
+    console.print("\n" * top_margin, end="")
+
+    # === Main box top border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
+
+    # === Title row ===
+    title_text = title[: box_width - 4].center(box_width - 2)
+    console.print(
+        f"{prefix}{btn_spacer}  {BOX_V}[bold cyan]{title_text}[/bold cyan]{BOX_V}"
+    )
+
+    # === Separator ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
+
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * inner_width}{BOX_V}")
+
+    # === Content area with plain text (no item borders) ===
+    for line_num in range(9):
+        slot_idx = line_num // 3
+        btn_line = line_num % 3
+
+        # Dimmed side buttons
+        left_btn = _render_small_box(str(slot_idx + 1), btn_width, highlight=False)
+
+        if slot_idx == 0:
+            right_btn = _render_small_box("u", btn_width, highlight=False)
+        elif slot_idx == 2:
+            right_btn = _render_small_box("d", btn_width, highlight=False)
+        else:
+            right_btn = [" " * btn_width] * 3
+
+        # Content text centered
+        if line_num < len(content_lines):
+            content = content_lines[line_num].center(inner_width)
+        else:
+            content = " " * inner_width
+
+        console.print(
+            f"{prefix}{left_btn[btn_line]}  "
+            f"{BOX_V}{content}{BOX_V}  "
+            f"{right_btn[btn_line]}"
+        )
+
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * inner_width}{BOX_V}")
+
+    # === Main box bottom border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
+
+    # === Navigation buttons ===
+    back_btn = _render_small_box("b", 8, highlight=back_highlight)
+    home_btn = _render_small_box("h", 8, highlight=False)
+
+    box_start = btn_width + 2
+    box_center = box_start + box_width // 2
+    nav_btn_width = NAV_BTN_WIDTH
+    btn_gap = NAV_BTN_GAP
+    nav_start = box_center - nav_btn_width - btn_gap // 2
+
+    for line_idx in range(3):
+        console.print(
+            f"{prefix}{' ' * nav_start}{back_btn[line_idx]}{' ' * btn_gap}{home_btn[line_idx]}"
+        )
 
 
 def _render_small_box(text: str, width: int = 5, highlight: bool = True) -> list[str]:
@@ -140,7 +248,7 @@ def _render_menu_box(
     scroll_offset: int,
     show_back: bool,
     show_home: bool,
-    box_width: int = 54,
+    box_width: int = BOX_WIDTH,
 ) -> None:
     """Render the menu box with controls."""
     clear_screen()
@@ -148,7 +256,7 @@ def _render_menu_box(
     term_width, term_height = _get_terminal_size()
 
     # Calculate dimensions
-    btn_width = 5
+    btn_width = BTN_WIDTH
     total_width = btn_width + 2 + box_width + 2 + btn_width
 
     left_margin = max(0, (term_width - total_width) // 2)
@@ -229,8 +337,8 @@ def _render_menu_box(
     # Center buttons under the main box, on either side of vertical center
     box_start = btn_width + 2  # Main box starts after left button area + gap
     box_center = box_start + box_width // 2
-    nav_btn_width = 8
-    btn_gap = 4  # Gap between the two buttons at center
+    nav_btn_width = NAV_BTN_WIDTH
+    btn_gap = NAV_BTN_GAP  # Gap between the two buttons at center
     nav_start = box_center - nav_btn_width - btn_gap // 2
 
     for line_idx in range(3):
@@ -309,7 +417,7 @@ def _render_loading_box(
     message: str,
     spinner_char: str,
     status: str | None = None,
-    box_width: int = 54,
+    box_width: int = BOX_WIDTH,
 ) -> None:
     """Render a loading box matching menu dimensions with placeholder buttons."""
     clear_screen()
@@ -317,7 +425,7 @@ def _render_loading_box(
     term_width, term_height = _get_terminal_size()
 
     # Match menu dimensions exactly
-    btn_width = 5
+    btn_width = BTN_WIDTH
     total_width = btn_width + 2 + box_width + 2 + btn_width
 
     left_margin = max(0, (term_width - total_width) // 2)
@@ -393,8 +501,8 @@ def _render_loading_box(
 
     box_start = btn_width + 2
     box_center = box_start + box_width // 2
-    nav_btn_width = 8
-    btn_gap = 4
+    nav_btn_width = NAV_BTN_WIDTH
+    btn_gap = NAV_BTN_GAP
     nav_start = box_center - nav_btn_width - btn_gap // 2
 
     for line_idx in range(3):
@@ -442,10 +550,6 @@ class LoadingSpinner:
             except asyncio.CancelledError:
                 pass
 
-    def update_message(self, message: str) -> None:
-        """Update the spinner message (title)."""
-        self.message = message
-
     def set_status(self, status: str | None) -> None:
         """Update the status text shown below the spinner."""
         self.status = status
@@ -454,11 +558,6 @@ class LoadingSpinner:
 def spinner(message: str, status: str | None = None) -> LoadingSpinner:
     """Return an async spinner context manager for loading screens."""
     return LoadingSpinner(message, status)
-
-
-def print_header(title: str) -> None:
-    """Print a styled header (clears screen)."""
-    clear_screen()
 
 
 def print_success(message: str) -> None:
@@ -479,56 +578,6 @@ def print_warning(message: str) -> None:
 def print_info(message: str) -> None:
     """Print an info message."""
     console.print(f"  [cyan]→[/cyan] {message}")
-
-
-def print_coordinators_table(coordinators: list[DetectedCoordinator]) -> None:
-    """Display coordinators in a table."""
-    table = Table(title="Detected Coordinators", box=None)
-    table.add_column("#", style="cyan", justify="right")
-    table.add_column("Port", style="green")
-    table.add_column("Type", style="yellow")
-
-    for idx, coord in enumerate(coordinators, 1):
-        table.add_row(str(idx), coord.port, coord.radio_type.pretty_name)
-
-    console.print()
-    console.print(table)
-    console.print()
-
-
-def print_devices_table(devices: list[dict[str, Any]]) -> None:
-    """Display devices in a table."""
-    table = Table(title="Paired Devices", box=None)
-    table.add_column("#", style="cyan", justify="right")
-    table.add_column("Name", style="white")
-    table.add_column("Model", style="yellow")
-    table.add_column("Status", style="blue")
-
-    for idx, device in enumerate(devices, 1):
-        name = device["name"] or device["model"] or str(device["ieee"])
-        status = "[green]●[/green]" if device["available"] else "[red]●[/red]"
-        table.add_row(str(idx), name, device["model"] or "-", status)
-
-    console.print()
-    console.print(table)
-    console.print()
-
-
-def print_entities_table(entities: list[dict[str, Any]]) -> None:
-    """Display entities in a table."""
-    table = Table(title="Controllable Entities", box=None)
-    table.add_column("#", style="cyan", justify="right")
-    table.add_column("Name", style="white")
-    table.add_column("State", style="yellow")
-
-    for idx, entity in enumerate(entities, 1):
-        state_str = _format_entity_state(entity)
-        name = entity.get("display_name", "Unknown")
-        table.add_row(str(idx), name, state_str)
-
-    console.print()
-    console.print(table)
-    console.print()
 
 
 def _format_entity_state(entity: dict[str, Any]) -> str:
@@ -593,8 +642,8 @@ def format_sensor_option(name: str, value: str) -> str:
 
 def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -> bool:
     """Prompt for confirmation using the standard menu layout."""
-    box_width = 54
-    btn_width = 5
+    box_width = BOX_WIDTH
+    btn_width = BTN_WIDTH
 
     term_width, term_height = _get_terminal_size()
     total_width = btn_width + 2 + box_width + 2 + btn_width
@@ -625,18 +674,7 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
 
     # Word wrap message
     text_width = inner_width - 4
-    words = message.split()
-    lines: list[str] = []
-    current = ""
-    for word in words:
-        if len(current) + len(word) + 1 <= text_width:
-            current = f"{current} {word}".strip()
-        else:
-            if current:
-                lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
+    lines = _word_wrap(message, text_width)
 
     # === Content area: message text + Yes option ===
     for line_num in range(9):
@@ -700,8 +738,8 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
 
     box_start = btn_width + 2
     box_center = box_start + box_width // 2
-    nav_btn_width = 8
-    btn_gap = 4
+    nav_btn_width = NAV_BTN_WIDTH
+    btn_gap = NAV_BTN_GAP
     nav_start = box_center - nav_btn_width - btn_gap // 2
 
     for line_idx in range(3):
@@ -723,32 +761,6 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
         return False
 
 
-def prompt_int(message: str, default: int | None = None) -> int:
-    """Prompt for an integer."""
-    default_str = f" [{default}]" if default is not None else ""
-    console.print(f"  {message}{default_str}: ", end="")
-
-    try:
-        response = input().strip()
-        if not response and default is not None:
-            return default
-        return int(response)
-    except (ValueError, KeyboardInterrupt, EOFError):
-        return default if default is not None else 0
-
-
-def prompt_str(message: str, default: str | None = None) -> str:
-    """Prompt for a string."""
-    default_str = f" [{default}]" if default else ""
-    console.print(f"  {message}{default_str}: ", end="")
-
-    try:
-        response = input().strip()
-        return response if response else (default or "")
-    except (KeyboardInterrupt, EOFError):
-        return default or ""
-
-
 def prompt_device_name(
     title: str, manufacturer: str | None, model: str | None, default: str | None = None
 ) -> str | None:
@@ -763,35 +775,6 @@ def prompt_device_name(
     Returns:
         The entered name, or None if cancelled.
     """
-    box_width = 54
-    btn_width = 5
-
-    term_width, term_height = _get_terminal_size()
-    total_width = btn_width + 2 + box_width + 2 + btn_width
-    left_margin = max(0, (term_width - total_width) // 2)
-    top_margin = max(0, (term_height - 20) // 2)
-
-    clear_screen()
-    prefix = " " * left_margin
-    btn_spacer = " " * btn_width
-
-    console.print("\n" * top_margin, end="")
-
-    # === Main box top border ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
-
-    # === Title row ===
-    title_text = title[: box_width - 4].center(box_width - 2)
-    console.print(
-        f"{prefix}{btn_spacer}  {BOX_V}[bold cyan]{title_text}[/bold cyan]{BOX_V}"
-    )
-
-    # === Separator ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
-
-    # === Empty row for spacing ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
-
     # Build info lines for display
     info_lines: list[str] = []
     if manufacturer:
@@ -801,56 +784,7 @@ def prompt_device_name(
     if default:
         info_lines.append(f"Default: {default}")
 
-    inner_width = box_width - 2
-
-    # === Content area with plain text (no item borders) ===
-    for line_num in range(9):
-        slot_idx = line_num // 3
-        btn_line = line_num % 3
-
-        # Dimmed side buttons
-        left_btn = _render_small_box(str(slot_idx + 1), btn_width, highlight=False)
-
-        if slot_idx == 0:
-            right_btn = _render_small_box("u", btn_width, highlight=False)
-        elif slot_idx == 2:
-            right_btn = _render_small_box("d", btn_width, highlight=False)
-        else:
-            right_btn = [" " * btn_width] * 3
-
-        # Info text centered in the middle area
-        if line_num < len(info_lines):
-            content = info_lines[line_num].center(inner_width)
-        else:
-            content = " " * inner_width
-
-        console.print(
-            f"{prefix}{left_btn[btn_line]}  "
-            f"{BOX_V}{content}{BOX_V}  "
-            f"{right_btn[btn_line]}"
-        )
-
-    # === Empty row for spacing ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
-
-    # === Main box bottom border ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
-
-    # === Navigation buttons (dimmed) ===
-    back_btn = _render_small_box("b", 8, highlight=False)
-    home_btn = _render_small_box("h", 8, highlight=False)
-
-    box_start = btn_width + 2
-    box_center = box_start + box_width // 2
-    nav_btn_width = 8
-    btn_gap = 4
-    nav_start = box_center - nav_btn_width - btn_gap // 2
-
-    for line_idx in range(3):
-        console.print(
-            f"{prefix}{' ' * nav_start}{back_btn[line_idx]}{' ' * btn_gap}{home_btn[line_idx]}"
-        )
-
+    _render_text_dialog(title, info_lines)
     console.print()
 
     try:
@@ -865,98 +799,12 @@ def prompt_device_name(
 
 def show_message(title: str, message: str, wait: bool = True) -> None:
     """Show a message using the standard menu layout with plain text content."""
-    box_width = 54
-    btn_width = 5
-
-    term_width, term_height = _get_terminal_size()
-    total_width = btn_width + 2 + box_width + 2 + btn_width
-    left_margin = max(0, (term_width - total_width) // 2)
-    top_margin = max(0, (term_height - 20) // 2)
-
-    clear_screen()
-    prefix = " " * left_margin
-    btn_spacer = " " * btn_width
-    inner_width = box_width - 2
-
-    console.print("\n" * top_margin, end="")
-
-    # === Main box top border ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
-
-    # === Title row ===
-    title_text = title[: box_width - 4].center(box_width - 2)
-    console.print(
-        f"{prefix}{btn_spacer}  {BOX_V}[bold cyan]{title_text}[/bold cyan]{BOX_V}"
-    )
-
-    # === Separator ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
-
-    # === Empty row for spacing ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * inner_width}{BOX_V}")
-
-    # Word wrap message
+    # Word wrap message to fit the content area
+    inner_width = BOX_WIDTH - 2
     text_width = inner_width - 4
-    words = message.split()
-    lines: list[str] = []
-    current = ""
-    for word in words:
-        if len(current) + len(word) + 1 <= text_width:
-            current = f"{current} {word}".strip()
-        else:
-            if current:
-                lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
+    lines = _word_wrap(message, text_width)
 
-    # === Content area with plain text (no item borders) ===
-    for line_num in range(9):
-        slot_idx = line_num // 3
-        btn_line = line_num % 3
-
-        # Dimmed side buttons
-        left_btn = _render_small_box(str(slot_idx + 1), btn_width, highlight=False)
-
-        if slot_idx == 0:
-            right_btn = _render_small_box("u", btn_width, highlight=False)
-        elif slot_idx == 2:
-            right_btn = _render_small_box("d", btn_width, highlight=False)
-        else:
-            right_btn = [" " * btn_width] * 3
-
-        # Message text centered in the middle area
-        if line_num < len(lines):
-            content = lines[line_num].center(inner_width)
-        else:
-            content = " " * inner_width
-
-        console.print(
-            f"{prefix}{left_btn[btn_line]}  "
-            f"{BOX_V}{content}{BOX_V}  "
-            f"{right_btn[btn_line]}"
-        )
-
-    # === Empty row for spacing ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * inner_width}{BOX_V}")
-
-    # === Main box bottom border ===
-    console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
-
-    # === Navigation buttons (dimmed) ===
-    back_btn = _render_small_box("b", 8, highlight=False)
-    home_btn = _render_small_box("h", 8, highlight=False)
-
-    box_start = btn_width + 2
-    box_center = box_start + box_width // 2
-    nav_btn_width = 8
-    btn_gap = 4
-    nav_start = box_center - nav_btn_width - btn_gap // 2
-
-    for line_idx in range(3):
-        console.print(
-            f"{prefix}{' ' * nav_start}{back_btn[line_idx]}{' ' * btn_gap}{home_btn[line_idx]}"
-        )
+    _render_text_dialog(title, lines)
 
     if wait:
         console.print()

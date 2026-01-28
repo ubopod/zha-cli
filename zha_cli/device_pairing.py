@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -31,11 +30,6 @@ class DevicePairingManager:
         self._unsubscribe_joined: Callable[[], None] | None = None
         self._unsubscribe_initialized: Callable[[], None] | None = None
         self._pairing_active = False
-
-    @property
-    def is_pairing_active(self) -> bool:
-        """Return True if pairing mode is active."""
-        return self._pairing_active
 
     def subscribe_to_events(
         self,
@@ -92,34 +86,3 @@ class DevicePairingManager:
         await self._gateway.application_controller.permit(0)
         self._pairing_active = False
         _LOGGER.info("Pairing mode disabled")
-
-    async def wait_for_device(
-        self,
-        timeout_s: int = DEFAULT_PAIRING_DURATION,
-    ) -> Any | None:
-        """Wait for a device to be fully initialized.
-
-        Args:
-            timeout_s: Maximum time to wait in seconds.
-
-        Returns:
-            The device initialization event, or None if timeout.
-
-        """
-        event_received = asyncio.Event()
-        device_event: list[Any] = []
-
-        def on_initialized(event: Any) -> None:
-            device_event.append(event)
-            event_received.set()
-
-        unsubscribe = self.subscribe_to_events(on_initialized=on_initialized)
-
-        try:
-            await asyncio.wait_for(event_received.wait(), timeout=timeout_s)
-            return device_event[0] if device_event else None
-        except TimeoutError:
-            _LOGGER.debug("Timeout waiting for device")
-            return None
-        finally:
-            unsubscribe()
