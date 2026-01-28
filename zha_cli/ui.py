@@ -350,7 +350,7 @@ def _render_loading_box(message: str, spinner_char: str, box_width: int = 54) ->
         # Content for middle slot (spinner), empty for others
         if i == 1:
             # Spinner box flush left with right padding (matching option box layout)
-            slot_width = box_width - 4  # matches option box width parameter
+            slot_width = box_width - 2  # matches main box interior width
             right_padding = 4
             inner_box_width = slot_width - right_padding
             horiz_width = inner_box_width - 2
@@ -361,7 +361,7 @@ def _render_loading_box(message: str, spinner_char: str, box_width: int = 54) ->
                 f"[dim]{BOX_BL}{BOX_H * horiz_width}{BOX_BR}[/dim]{' ' * right_padding}",
             ]
         else:
-            opt_lines = _render_empty_option_slot(box_width - 4)
+            opt_lines = _render_empty_option_slot(box_width - 2)
 
         for line_idx in range(3):
             console.print(
