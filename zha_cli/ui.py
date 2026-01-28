@@ -409,11 +409,12 @@ def prompt_menu(
 
             if response == "u":
                 if scroll_offset > 0:
-                    scroll_offset -= 1
+                    scroll_offset = max(0, scroll_offset - VISIBLE_OPTIONS)
                 continue
             if response == "d":
                 if scroll_offset + VISIBLE_OPTIONS < total_options:
-                    scroll_offset += 1
+                    max_offset = total_options - VISIBLE_OPTIONS
+                    scroll_offset = min(max_offset, scroll_offset + VISIBLE_OPTIONS)
                 continue
 
             if response in ("1", "2", "3"):
