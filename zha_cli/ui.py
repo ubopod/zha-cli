@@ -209,10 +209,16 @@ def _render_menu_box(
     else:
         home_btn = [" " * 8] * 3
 
-    nav_spacing = box_width - 8
+    # Center buttons under the main box, on either side of vertical center
+    box_start = btn_width + 2  # Main box starts after left button area + gap
+    box_center = box_start + box_width // 2
+    nav_btn_width = 8
+    btn_gap = 4  # Gap between the two buttons at center
+    nav_start = box_center - nav_btn_width - btn_gap // 2
+
     for line_idx in range(3):
         console.print(
-            f"{prefix}{back_btn[line_idx]}{' ' * nav_spacing}{home_btn[line_idx]}"
+            f"{prefix}{' ' * nav_start}{back_btn[line_idx]}{' ' * btn_gap}{home_btn[line_idx]}"
         )
 
     # === Scroll indicator ===
