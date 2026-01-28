@@ -605,14 +605,13 @@ def format_coordinator_option(port: str, status: str, name: str | None = None) -
     """
     # Use custom name if available, otherwise show port
     display = name if name else port
-    port_suffix = f" ({port})" if name else ""
 
     if status == "connected":
-        return f"[green]●[/green] {display}{port_suffix} (connected)"
+        return f"[green]●[/green] {display}"
     elif status == "saved":
-        return f"[yellow]●[/yellow] {display}{port_suffix} (saved)"
+        return f"[yellow]●[/yellow] {display}"
     else:
-        return f"[dim]○[/dim] {display}{port_suffix} (new)"
+        return f"[dim]○[/dim] {display}"
 
 
 def format_device_option(name: str, available: bool) -> str:
