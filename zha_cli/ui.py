@@ -558,27 +558,44 @@ def format_entity_option(name: str, is_on: bool | None) -> str:
     return f"{name} {status}"
 
 
-def prompt_confirm(message: str, default: bool = True) -> bool:
-    """Prompt for confirmation in a centered box."""
+def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -> bool:
+    """Prompt for confirmation using the standard menu layout."""
     box_width = 54
+    btn_width = 5
+
     term_width, term_height = _get_terminal_size()
-    left_margin = max(0, (term_width - box_width) // 2)
-    top_margin = max(0, (term_height - 10) // 2)
+    total_width = btn_width + 2 + box_width + 2 + btn_width
+    left_margin = max(0, (term_width - total_width) // 2)
+    top_margin = max(0, (term_height - 20) // 2)
 
     clear_screen()
     prefix = " " * left_margin
-    inner_width = box_width - 4
+    btn_spacer = " " * btn_width
 
     console.print("\n" * top_margin, end="")
-    console.print(f"{prefix}{BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
-    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
 
-    # Message (word wrap)
+    # === Main box top border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
+
+    # === Title row ===
+    title_text = title[: box_width - 4].center(box_width - 2)
+    console.print(
+        f"{prefix}{btn_spacer}  {BOX_V}[bold cyan]{title_text}[/bold cyan]{BOX_V}"
+    )
+
+    # === Separator ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
+
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # === Message row (slot 1 position) - word wrap ===
+    inner_width = box_width - 6
     words = message.split()
-    lines = []
+    lines: list[str] = []
     current = ""
     for word in words:
-        if len(current) + len(word) + 1 <= inner_width - 2:
+        if len(current) + len(word) + 1 <= inner_width:
             current = f"{current} {word}".strip()
         else:
             if current:
@@ -587,31 +604,90 @@ def prompt_confirm(message: str, default: bool = True) -> bool:
     if current:
         lines.append(current)
 
-    for line in lines[:2]:
-        console.print(f"{prefix}{BOX_V} {line.center(inner_width)} {BOX_V}")
+    # Show message in first option slot area (with dimmed buttons)
+    left_btn_1 = _render_small_box("1", btn_width, highlight=False)
+    right_btn_u = _render_small_box("u", btn_width, highlight=False)
 
-    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+    # Build message box that merges with main box
+    msg_width = box_width - 2
+    right_padding = 4
+    inner_box_width = msg_width - right_padding
+    horiz_width = inner_box_width - 2
 
-    # Y/N buttons
-    yes_btn = _render_small_box("y", 5, highlight=default)
-    no_btn = _render_small_box("n", 5, highlight=not default)
-    btn_spacing = inner_width - 16
+    # Pad/truncate message lines
+    msg_line_1 = (lines[0] if lines else "").center(horiz_width - 2)
+    msg_line_2 = (lines[1] if len(lines) > 1 else "").center(horiz_width - 2)
 
-    for i in range(3):
+    msg_box = [
+        f"{BOX_LT}{BOX_H * horiz_width}{BOX_TR}{' ' * right_padding}",
+        f"{BOX_V} {msg_line_1} {BOX_V}{' ' * right_padding}",
+        f"{BOX_V} {msg_line_2} {BOX_V}{' ' * right_padding}",
+    ]
+
+    for line_idx in range(3):
         console.print(
-            f"{prefix}{BOX_V}   {yes_btn[i]}{' ' * btn_spacing}{no_btn[i]}   {BOX_V}"
+            f"{prefix}{left_btn_1[line_idx]}  "
+            f"{msg_box[line_idx]}{BOX_V}  "
+            f"{right_btn_u[line_idx]}"
         )
 
-    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
-    console.print(f"{prefix}{BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
+    # === Yes option (slot 2) ===
+    left_btn_2 = _render_small_box("2", btn_width, highlight=True)
+    yes_box = _render_option_box("1. Yes", box_width - 2)
+    empty_right = [" " * btn_width] * 3
+
+    for line_idx in range(3):
+        console.print(
+            f"{prefix}{left_btn_2[line_idx]}  "
+            f"{yes_box[line_idx]}{BOX_V}  "
+            f"{empty_right[line_idx]}"
+        )
+
+    # === No option (slot 3) ===
+    left_btn_3 = _render_small_box("3", btn_width, highlight=True)
+    no_box = _render_option_box("2. No", box_width - 2)
+    right_btn_d = _render_small_box("d", btn_width, highlight=False)
+
+    for line_idx in range(3):
+        console.print(
+            f"{prefix}{left_btn_3[line_idx]}  "
+            f"{no_box[line_idx]}{BOX_V}  "
+            f"{right_btn_d[line_idx]}"
+        )
+
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # === Main box bottom border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
+
+    # === Navigation buttons (dimmed) ===
+    back_btn = _render_small_box("b", 8, highlight=False)
+    home_btn = _render_small_box("h", 8, highlight=False)
+
+    box_start = btn_width + 2
+    box_center = box_start + box_width // 2
+    nav_btn_width = 8
+    btn_gap = 4
+    nav_start = box_center - nav_btn_width - btn_gap // 2
+
+    for line_idx in range(3):
+        console.print(
+            f"{prefix}{' ' * nav_start}{back_btn[line_idx]}{' ' * btn_gap}{home_btn[line_idx]}"
+        )
+
     console.print()
 
     try:
-        console.print(f"{prefix}  [dim]Enter choice (y/n):[/dim] ", end="")
+        console.print("  [dim]Enter choice:[/dim] ", end="")
         response = input().strip().lower()
         if not response:
             return default
-        return response in ("y", "yes")
+        if response in ("1", "y", "yes"):
+            return True
+        if response in ("2", "n", "no"):
+            return False
+        return default
     except (KeyboardInterrupt, EOFError):
         return False
 
@@ -711,32 +787,43 @@ def prompt_device_name(
 
 
 def show_message(title: str, message: str, wait: bool = True) -> None:
-    """Show a message in a centered box."""
+    """Show a message using the standard menu layout."""
     box_width = 54
+    btn_width = 5
+
     term_width, term_height = _get_terminal_size()
-    left_margin = max(0, (term_width - box_width) // 2)
-    top_margin = max(0, (term_height - 10) // 2)
+    total_width = btn_width + 2 + box_width + 2 + btn_width
+    left_margin = max(0, (term_width - total_width) // 2)
+    top_margin = max(0, (term_height - 20) // 2)
 
     clear_screen()
     prefix = " " * left_margin
-    inner_width = box_width - 4
+    btn_spacer = " " * btn_width
 
     console.print("\n" * top_margin, end="")
-    console.print(f"{prefix}{BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
 
-    # Title
-    title_text = title[: inner_width - 2].center(inner_width)
-    console.print(f"{prefix}{BOX_V} [bold cyan]{title_text}[/bold cyan] {BOX_V}")
+    # === Main box top border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
 
-    console.print(f"{prefix}{BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
-    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+    # === Title row ===
+    title_text = title[: box_width - 4].center(box_width - 2)
+    console.print(
+        f"{prefix}{btn_spacer}  {BOX_V}[bold cyan]{title_text}[/bold cyan]{BOX_V}"
+    )
+
+    # === Separator ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
+
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
 
     # Word wrap message
+    inner_width = box_width - 10  # Account for box padding
     words = message.split()
-    lines = []
+    lines: list[str] = []
     current = ""
     for word in words:
-        if len(current) + len(word) + 1 <= inner_width - 2:
+        if len(current) + len(word) + 1 <= inner_width:
             current = f"{current} {word}".strip()
         else:
             if current:
@@ -745,19 +832,63 @@ def show_message(title: str, message: str, wait: bool = True) -> None:
     if current:
         lines.append(current)
 
-    for line in lines[:3]:
-        console.print(f"{prefix}{BOX_V} {line.ljust(inner_width)} {BOX_V}")
+    # === Three option slot rows with dimmed buttons ===
+    for i in range(VISIBLE_OPTIONS):
+        left_btn = _render_small_box(str(i + 1), btn_width, highlight=False)
 
-    # Pad remaining lines
-    for _ in range(3 - len(lines[:3])):
-        console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+        if i == 0:
+            right_btn = _render_small_box("u", btn_width, highlight=False)
+        elif i == 2:
+            right_btn = _render_small_box("d", btn_width, highlight=False)
+        else:
+            right_btn = [" " * btn_width] * 3
 
-    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
-    console.print(f"{prefix}{BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
+        # Build message box for this slot
+        msg_width = box_width - 2
+        right_padding = 4
+        inner_box_width = msg_width - right_padding
+        horiz_width = inner_box_width - 2
+
+        # Get message line for this slot (centered)
+        msg_line = (lines[i] if i < len(lines) else "").center(horiz_width - 2)
+
+        msg_box = [
+            f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_TR}[/dim]{' ' * right_padding}",
+            f"[dim]{BOX_V}[/dim] {msg_line} [dim]{BOX_V}[/dim]{' ' * right_padding}",
+            f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_BR}[/dim]{' ' * right_padding}",
+        ]
+
+        for line_idx in range(3):
+            console.print(
+                f"{prefix}{left_btn[line_idx]}  "
+                f"{msg_box[line_idx]}{BOX_V}  "
+                f"{right_btn[line_idx]}"
+            )
+
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # === Main box bottom border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
+
+    # === Navigation buttons (dimmed) ===
+    back_btn = _render_small_box("b", 8, highlight=False)
+    home_btn = _render_small_box("h", 8, highlight=False)
+
+    box_start = btn_width + 2
+    box_center = box_start + box_width // 2
+    nav_btn_width = 8
+    btn_gap = 4
+    nav_start = box_center - nav_btn_width - btn_gap // 2
+
+    for line_idx in range(3):
+        console.print(
+            f"{prefix}{' ' * nav_start}{back_btn[line_idx]}{' ' * btn_gap}{home_btn[line_idx]}"
+        )
 
     if wait:
         console.print()
-        console.print(f"{prefix}  [dim]Press Enter to continue...[/dim]")
+        console.print("  [dim]Press Enter to continue...[/dim]")
         try:
             input()
         except (KeyboardInterrupt, EOFError):

@@ -402,17 +402,22 @@ class ZHACli:
                 ui.print_info(f"Device joined: {event.device_info.ieee}")
 
             def on_initialized(event: Any) -> None:
-                info = event.device_info
-                ui.print_success(
-                    f"Device initialized: {info.manufacturer} {info.model}"
-                )
-                new_devices.append(
-                    {
-                        "ieee": str(info.ieee),
-                        "manufacturer": info.manufacturer,
-                        "model": info.model,
-                    }
-                )
+                try:
+                    info = event.device_info
+                    ui.print_success(
+                        f"Device initialized: {info.manufacturer} {info.model}"
+                    )
+                    # Only track truly new devices (not re-initialized existing ones)
+                    if getattr(event, "new_join", True):
+                        new_devices.append(
+                            {
+                                "ieee": str(info.ieee),
+                                "manufacturer": info.manufacturer,
+                                "model": info.model,
+                            }
+                        )
+                except Exception as exc:
+                    _LOGGER.exception("Error in on_initialized callback: %s", exc)
 
             unsubscribe = pairing_manager.subscribe_to_events(
                 on_joined=on_joined,
@@ -517,7 +522,24 @@ class ZHACli:
     async def _control_device_direct(self, device_info: dict[str, Any]) -> None:
         """Control a specific device."""
         ieee = str(device_info["ieee"])
-        name = device_info["name"] or device_info["model"] or ieee
+        manufacturer = device_info.get("manufacturer")
+        model = device_info.get("model")
+
+        # Prompt for name if device doesn't have a custom name yet
+        if not device_info.get("custom_name"):
+            default_name = model or manufacturer or "Device"
+            new_name = ui.prompt_device_name(
+                title="◆ Name Device",
+                manufacturer=manufacturer,
+                model=model,
+                default=default_name,
+            )
+            if new_name:
+                self._network_manager.set_device_name(ieee, new_name)
+                device_info["name"] = new_name
+                device_info["custom_name"] = new_name
+
+        name = device_info["name"] or model or ieee
 
         # Wait for entities to be available (device may still be initializing)
         entities = await self._wait_for_entities(ieee, name)
@@ -546,7 +568,7 @@ class ZHACli:
                 ui.show_message(name, msg)
                 return
 
-            # Build options: one per entity for toggle
+            # Build options: one per entity for toggle, plus rename option
             entity_infos = [DeviceController.get_entity_info(e) for e in entities]
             options: list[str] = []
             for info in entity_infos:
@@ -557,6 +579,10 @@ class ZHACli:
                 )
                 options.append(ui.format_entity_option(entity_name, is_on))
 
+            # Add rename option at the end
+            rename_idx = len(options)
+            options.append("Rename device")
+
             choice = ui.prompt_menu(
                 f"◆ {name}", options, show_back=True, show_home=True
             )
@@ -566,6 +592,20 @@ class ZHACli:
             if choice == MENU_HOME:
                 self._running = False
                 return
+
+            if choice == rename_idx + 1:
+                # Rename device
+                new_name = ui.prompt_device_name(
+                    title="◆ Rename Device",
+                    manufacturer=manufacturer,
+                    model=model,
+                    default=name,
+                )
+                if new_name and new_name != name:
+                    self._network_manager.set_device_name(ieee, new_name)
+                    name = new_name
+                    ui.print_success(f"Device renamed to: {name}")
+                continue
 
             # Toggle the selected entity
             selected_entity = entities[choice - 1]
