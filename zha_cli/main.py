@@ -519,6 +519,15 @@ class ZHACli:
         if entities is None:
             return
 
+        # Proactively refresh all entities to get latest values from device
+        fresh_info = self._network_manager.get_device_by_ieee(ieee)
+        if fresh_info:
+            all_entities = DeviceController.get_all_entities(fresh_info["device"])
+            if all_entities:
+                async with ui.spinner(f"◆ {name}", status="Reading device..."):
+                    for entity in all_entities:
+                        await DeviceController.refresh_entity(entity)
+
         while True:
             # Fetch fresh device reference to ensure entities are current
             fresh_info = self._network_manager.get_device_by_ieee(ieee)
