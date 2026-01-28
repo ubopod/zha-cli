@@ -1207,11 +1207,33 @@ class LiveSensorView:
                     listener_count,
                 )
                 if hasattr(cluster_handler, "on_event"):
+                    # Log object identity and listener count before
+                    listeners_before = len(
+                        getattr(cluster_handler, "_listeners", {}).get(
+                            CLUSTER_HANDLER_ATTRIBUTE_UPDATED, []
+                        )
+                    )
+                    _LOGGER.debug(
+                        "  Before subscribe: id(cluster_handler)=%s, listeners=%d",
+                        id(cluster_handler),
+                        listeners_before,
+                    )
                     unsub = cluster_handler.on_event(
                         CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
                         self._on_attribute_updated,
                     )
                     self._unsubscribe_handlers.append(unsub)
+                    # Log listener count after
+                    listeners_after = len(
+                        getattr(cluster_handler, "_listeners", {}).get(
+                            CLUSTER_HANDLER_ATTRIBUTE_UPDATED, []
+                        )
+                    )
+                    _LOGGER.debug(
+                        "  After subscribe: listeners=%d (added %d)",
+                        listeners_after,
+                        listeners_after - listeners_before,
+                    )
                     _LOGGER.debug(
                         "  Subscribed to cluster handler for: %s", sensor_name
                     )
