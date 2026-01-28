@@ -192,12 +192,13 @@ def _render_menu_box(
             opt_box = _render_option_box(
                 f"{scroll_offset + i + 1}. {opt}", box_width - 2
             )
-            left_btn = _render_small_box(str(i + 1), btn_width, highlight=True)
         else:
             opt_box = _render_empty_option_slot(box_width - 2)
-            left_btn = [" " * btn_width] * 3
 
-        # Right side buttons (u for first row, d for third row)
+        # Left buttons always visible (1, 2, 3), highlighted if option exists
+        left_btn = _render_small_box(str(i + 1), btn_width, highlight=(opt is not None))
+
+        # Right side buttons always visible (u on row 0, d on row 2)
         if i == 0:
             right_btn = _render_small_box("u", btn_width, highlight=can_scroll_up)
         elif i == 2:
@@ -220,16 +221,9 @@ def _render_menu_box(
     # === Main box bottom border ===
     console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
 
-    # === Navigation buttons ===
-    if show_back:
-        back_btn = _render_small_box("b", 8, highlight=True)
-    else:
-        back_btn = [" " * 8] * 3
-
-    if show_home:
-        home_btn = _render_small_box("h", 8, highlight=True)
-    else:
-        home_btn = [" " * 8] * 3
+    # === Navigation buttons (always visible, highlighted when active) ===
+    back_btn = _render_small_box("b", 8, highlight=show_back)
+    home_btn = _render_small_box("h", 8, highlight=show_home)
 
     # Center buttons under the main box, on either side of vertical center
     box_start = btn_width + 2  # Main box starts after left button area + gap
