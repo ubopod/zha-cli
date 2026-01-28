@@ -163,13 +163,20 @@ class DeviceController:
         if platform == Platform.SENSOR:
             value = getattr(entity, "native_value", None)
             if value is not None:
-                # Try multiple attribute names for unit (ZHA may use different ones)
-                raw_unit = (
-                    getattr(entity, "native_unit_of_measurement", None)
-                    or getattr(entity, "unit_of_measurement", None)
-                    or entity.state.get("unit_of_measurement")
-                    or entity.state.get("native_unit_of_measurement")
-                )
+                # Try multiple sources for unit:
+                # 1. info_object.unit (primary source for ZHA sensors)
+                # 2. Direct attributes
+                # 3. State dict
+                raw_unit = None
+                info_obj = getattr(entity, "info_object", None)
+                if info_obj is not None:
+                    raw_unit = getattr(info_obj, "unit", None)
+                if not raw_unit:
+                    raw_unit = (
+                        getattr(entity, "_attr_native_unit_of_measurement", None)
+                        or getattr(entity, "native_unit_of_measurement", None)
+                        or entity.state.get("unit_of_measurement")
+                    )
                 unit = _format_unit(raw_unit)
                 if unit:
                     return f"{value} {unit}"
