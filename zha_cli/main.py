@@ -310,9 +310,6 @@ class ZHACli:
             await self._coordinator_entry_flow()
             return
 
-        coordinator = self._network_manager.coordinator
-        coord_name = coordinator.radio_type.pretty_name if coordinator else "Network"
-
         devices = self._network_manager.get_devices()
 
         # Build menu options: devices first, then actions
@@ -328,7 +325,7 @@ class ZHACli:
         reset_idx = len(options)
         options.append("Reset network")
 
-        title = f"◆ {coord_name}"
+        title = "◆ Zigbee"
         choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
 
         if choice in (0, MENU_HOME):
