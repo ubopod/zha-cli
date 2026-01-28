@@ -49,19 +49,19 @@ def _move_cursor_home() -> None:
     print("\033[H", end="", flush=True)
 
 
-def _ensure_screen_ready() -> None:
-    """Clear screen on first render, reposition cursor after.
+def _prepare_screen(use_cursor_home: bool = False) -> None:
+    """Prepare screen for rendering.
 
-    This provides smooth transitions between screens by only clearing
-    the screen once at startup, then using cursor repositioning for
-    subsequent renders.
+    Args:
+        use_cursor_home: If True and screen is initialized, use cursor
+            repositioning instead of clearing (for spinner animation).
     """
     global _screen_initialized
-    if not _screen_initialized:
+    if use_cursor_home and _screen_initialized:
+        _move_cursor_home()
+    else:
         clear_screen()
         _screen_initialized = True
-    else:
-        _move_cursor_home()
 
 
 def _strip_rich_markup(text: str) -> str:
@@ -140,7 +140,7 @@ def _render_text_dialog(
     left_margin = max(0, (term_width - total_width) // 2)
     top_margin = max(0, (term_height - 20) // 2)
 
-    _ensure_screen_ready()
+    _prepare_screen()
     prefix = " " * left_margin
     btn_spacer = " " * btn_width
     inner_width = box_width - 2
@@ -274,7 +274,7 @@ def _render_menu_box(
     box_width: int = BOX_WIDTH,
 ) -> None:
     """Render the menu box with controls."""
-    _ensure_screen_ready()
+    _prepare_screen()
 
     term_width, term_height = _get_terminal_size()
 
@@ -444,7 +444,7 @@ def _render_loading_box(
     box_width: int = BOX_WIDTH,
 ) -> None:
     """Render a loading box matching menu dimensions with placeholder buttons."""
-    _ensure_screen_ready()
+    _prepare_screen(use_cursor_home=True)  # Smooth animation between frames
 
     term_width, term_height = _get_terminal_size()
 
@@ -654,7 +654,7 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
     left_margin = max(0, (term_width - total_width) // 2)
     top_margin = max(0, (term_height - 20) // 2)
 
-    _ensure_screen_ready()
+    _prepare_screen()
     prefix = " " * left_margin
     btn_spacer = " " * btn_width
     inner_width = box_width - 2

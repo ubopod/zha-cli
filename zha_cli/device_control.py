@@ -13,6 +13,68 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Unit display mapping for common sensor units
+# Maps raw unit strings to nice display format with proper symbols
+UNIT_DISPLAY = {
+    # Temperature
+    "°C": "°C",
+    "C": "°C",
+    "celsius": "°C",
+    "°F": "°F",
+    "F": "°F",
+    "fahrenheit": "°F",
+    "K": "K",
+    "kelvin": "K",
+    # Percentage
+    "%": "%",
+    "percent": "%",
+    # Power
+    "W": "W",
+    "kW": "kW",
+    "mW": "mW",
+    # Energy
+    "Wh": "Wh",
+    "kWh": "kWh",
+    # Voltage
+    "V": "V",
+    "mV": "mV",
+    # Current
+    "A": "A",
+    "mA": "mA",
+    # Pressure
+    "hPa": "hPa",
+    "kPa": "kPa",
+    "Pa": "Pa",
+    "mbar": "mbar",
+    # Illuminance
+    "lx": "lx",
+    "lm": "lm",
+    # Signal
+    "dB": "dB",
+    "dBm": "dBm",
+    # Concentration
+    "ppm": "ppm",
+    "ppb": "ppb",
+    "µg/m³": "µg/m³",
+    "mg/m³": "mg/m³",
+}
+
+
+def _format_unit(unit: str | None) -> str:
+    """Format a unit string with proper display symbols.
+
+    Args:
+        unit: The raw unit string from the entity.
+
+    Returns:
+        Formatted unit string with proper symbols.
+    """
+    if not unit:
+        return ""
+    # Look up in display mapping, or return as-is
+    return UNIT_DISPLAY.get(unit, unit)
+
+
 # Platforms that support on/off control
 CONTROLLABLE_PLATFORMS = {Platform.SWITCH, Platform.LIGHT}
 
