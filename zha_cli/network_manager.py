@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -60,6 +61,46 @@ class NetworkManager:
         port_name = coordinator.port.replace("/", "_").replace("\\", "_")
         db_name = f"zigbee_{port_name}_{port_hash}.db"
         return self._data_dir / db_name
+
+    def _get_names_path(self, coordinator: DetectedCoordinator) -> Path:
+        """Get the device names file path for a coordinator."""
+        db_path = self.get_database_path(coordinator)
+        return db_path.with_suffix(".names.json")
+
+    def _load_device_names(self) -> dict[str, str]:
+        """Load device names from the current coordinator's names file."""
+        if self._coordinator is None:
+            return {}
+        names_path = self._get_names_path(self._coordinator)
+        if not names_path.exists():
+            return {}
+        try:
+            return json.loads(names_path.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            _LOGGER.warning("Failed to load device names: %s", exc)
+            return {}
+
+    def _save_device_names(self, names: dict[str, str]) -> None:
+        """Save device names to the current coordinator's names file."""
+        if self._coordinator is None:
+            return
+        names_path = self._get_names_path(self._coordinator)
+        try:
+            names_path.write_text(json.dumps(names, indent=2))
+        except OSError as exc:
+            _LOGGER.warning("Failed to save device names: %s", exc)
+
+    def get_device_name(self, ieee: str) -> str | None:
+        """Get the custom name for a device by IEEE address."""
+        names = self._load_device_names()
+        return names.get(str(ieee))
+
+    def set_device_name(self, ieee: str, name: str) -> None:
+        """Set a custom name for a device."""
+        names = self._load_device_names()
+        names[str(ieee)] = name
+        self._save_device_names(names)
+        _LOGGER.info("Set device name for %s: %s", ieee, name)
 
     def has_existing_network(self, coordinator: DetectedCoordinator) -> bool:
         """Check if a coordinator has an existing network database.
@@ -162,7 +203,7 @@ class NetworkManager:
         self._delete_database_file(db_path)
 
     def _delete_database_file(self, db_path: Path) -> None:
-        """Delete a database file and its related SQLite files."""
+        """Delete a database file and its related files."""
         if db_path.exists():
             _LOGGER.info("Deleting network database: %s", db_path)
             db_path.unlink()
@@ -174,6 +215,12 @@ class NetworkManager:
                     related.unlink()
 
             _LOGGER.info("Network database deleted")
+
+        # Delete the device names file
+        names_path = db_path.with_suffix(".names.json")
+        if names_path.exists():
+            _LOGGER.info("Deleting device names: %s", names_path)
+            names_path.unlink()
 
     def delete_all_networks(self) -> int:
         """Delete all saved network databases.
@@ -196,17 +243,21 @@ class NetworkManager:
         """Get all paired devices.
 
         Returns:
-            List of device info dictionaries.
+            List of device info dictionaries with custom names if set.
 
         """
         if self._gateway is None:
             return []
 
+        custom_names = self._load_device_names()
         devices = []
         for device in self._gateway.devices.values():
             # Skip the coordinator
             if device.is_coordinator:
                 continue
+
+            ieee_str = str(device.ieee)
+            custom_name = custom_names.get(ieee_str)
 
             devices.append(
                 {
@@ -214,7 +265,8 @@ class NetworkManager:
                     "nwk": device.nwk,
                     "manufacturer": device.manufacturer,
                     "model": device.model,
-                    "name": device.name,
+                    "name": custom_name or device.name,
+                    "custom_name": custom_name,
                     "available": device.available,
                     "device": device,
                 }
@@ -234,15 +286,20 @@ class NetworkManager:
         if self._gateway is None:
             return None
 
+        custom_names = self._load_device_names()
+
         # Convert string IEEE to the format used by the gateway
         for device in self._gateway.devices.values():
             if str(device.ieee) == str(ieee):
+                ieee_str = str(device.ieee)
+                custom_name = custom_names.get(ieee_str)
                 return {
                     "ieee": device.ieee,
                     "nwk": device.nwk,
                     "manufacturer": device.manufacturer,
                     "model": device.model,
-                    "name": device.name,
+                    "name": custom_name or device.name,
+                    "custom_name": custom_name,
                     "available": device.available,
                     "device": device,
                 }

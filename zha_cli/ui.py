@@ -637,6 +637,74 @@ def prompt_str(message: str, default: str | None = None) -> str:
         return default or ""
 
 
+def prompt_device_name(
+    title: str, manufacturer: str | None, model: str | None, default: str | None = None
+) -> str | None:
+    """Prompt for a device name in a styled box.
+
+    Args:
+        title: The title for the dialog.
+        manufacturer: Device manufacturer.
+        model: Device model.
+        default: Default name suggestion.
+
+    Returns:
+        The entered name, or None if cancelled.
+    """
+    box_width = 54
+    term_width, term_height = _get_terminal_size()
+    left_margin = max(0, (term_width - box_width) // 2)
+    top_margin = max(0, (term_height - 14) // 2)
+
+    clear_screen()
+    prefix = " " * left_margin
+    inner_width = box_width - 4
+
+    console.print("\n" * top_margin, end="")
+    console.print(f"{prefix}{BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
+
+    # Title
+    title_text = title[: inner_width - 2].center(inner_width)
+    console.print(f"{prefix}{BOX_V} [bold cyan]{title_text}[/bold cyan] {BOX_V}")
+
+    console.print(f"{prefix}{BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
+    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # Device info
+    if manufacturer:
+        mfr_text = f"Manufacturer: {manufacturer}"[: inner_width - 2]
+        console.print(f"{prefix}{BOX_V} {mfr_text.ljust(inner_width)} {BOX_V}")
+    if model:
+        model_text = f"Model: {model}"[: inner_width - 2]
+        console.print(f"{prefix}{BOX_V} {model_text.ljust(inner_width)} {BOX_V}")
+
+    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # Prompt hint
+    hint = "Enter a friendly name for this device:"
+    console.print(f"{prefix}{BOX_V} {hint.ljust(inner_width)} {BOX_V}")
+
+    if default:
+        default_hint = f"[dim](default: {default})[/dim]"
+        # Calculate visible length for padding
+        default_visible = f"(default: {default})"
+        padding = inner_width - len(default_visible)
+        console.print(f"{prefix}{BOX_V} {default_hint}{' ' * padding} {BOX_V}")
+
+    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+    console.print(f"{prefix}{BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
+    console.print()
+
+    try:
+        console.print(f"{prefix}  [dim]Name:[/dim] ", end="")
+        response = input().strip()
+        if response:
+            return response
+        return default
+    except (KeyboardInterrupt, EOFError):
+        return default
+
+
 def show_message(title: str, message: str, wait: bool = True) -> None:
     """Show a message in a centered box."""
     box_width = 54

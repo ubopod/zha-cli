@@ -374,6 +374,9 @@ class ZHACli:
 
         pairing_manager = self._pairing_manager
 
+        # Track newly paired devices
+        new_devices: list[dict[str, Any]] = []
+
         try:
             await pairing_manager.enable_pairing(duration)
 
@@ -382,9 +385,16 @@ class ZHACli:
                 ui.print_info(f"Device joined: {event.device_info.ieee}")
 
             def on_initialized(event: Any) -> None:
+                info = event.device_info
                 ui.print_success(
-                    f"Device initialized: {event.device_info.manufacturer} "
-                    f"{event.device_info.model}"
+                    f"Device initialized: {info.manufacturer} {info.model}"
+                )
+                new_devices.append(
+                    {
+                        "ieee": str(info.ieee),
+                        "manufacturer": info.manufacturer,
+                        "model": info.model,
+                    }
                 )
 
             unsubscribe = pairing_manager.subscribe_to_events(
@@ -404,9 +414,33 @@ class ZHACli:
 
             ui.print_success("Pairing mode ended")
 
+            # Prompt for names for each new device
+            for device in new_devices:
+                await self._prompt_device_name(device)
+
         except Exception as exc:
             ui.print_error(f"Pairing error: {exc}")
             _LOGGER.exception("Pairing failed")
+
+    async def _prompt_device_name(self, device_info: dict[str, Any]) -> None:
+        """Prompt the user to name a newly paired device."""
+        ieee = device_info["ieee"]
+        manufacturer = device_info.get("manufacturer")
+        model = device_info.get("model")
+
+        # Suggest a default name based on model or manufacturer
+        default_name = model or manufacturer or "New Device"
+
+        name = ui.prompt_device_name(
+            title="◆ Name Device",
+            manufacturer=manufacturer,
+            model=model,
+            default=default_name,
+        )
+
+        if name:
+            self._network_manager.set_device_name(ieee, name)
+            ui.print_success(f"Device named: {name}")
 
     async def _wait_for_entities(
         self, ieee: str, name: str, max_wait: float = 10.0
@@ -506,7 +540,9 @@ class ZHACli:
                 )
                 options.append(ui.format_entity_option(entity_name, is_on))
 
-            choice = ui.prompt_menu(f"◆ {name}", options, show_back=True, show_home=True)
+            choice = ui.prompt_menu(
+                f"◆ {name}", options, show_back=True, show_home=True
+            )
 
             if choice in (0, MENU_BACK):
                 return
