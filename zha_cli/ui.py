@@ -514,6 +514,38 @@ def _format_entity_state(entity: dict[str, Any]) -> str:
     return "[dim]Unknown[/dim]"
 
 
+def format_coordinator_option(port: str, status: str) -> str:
+    """Format coordinator for menu display.
+
+    Args:
+        port: The serial port path.
+        status: "connected", "saved", or "new".
+    """
+    if status == "connected":
+        return f"[green]●[/green] {port} (connected)"
+    elif status == "saved":
+        return f"[yellow]●[/yellow] {port} (saved network)"
+    else:
+        return f"[dim]○[/dim] {port} (new)"
+
+
+def format_device_option(name: str, available: bool) -> str:
+    """Format device for menu display."""
+    status = "[green]●[/green]" if available else "[red]●[/red]"
+    return f"{status} {name}"
+
+
+def format_entity_option(name: str, is_on: bool | None) -> str:
+    """Format entity for menu display."""
+    if is_on is None:
+        status = "[dim]Unknown[/dim]"
+    elif is_on:
+        status = "[green]ON[/green]"
+    else:
+        status = "[red]OFF[/red]"
+    return f"{name} {status}"
+
+
 def prompt_confirm(message: str, default: bool = True) -> bool:
     """Prompt for confirmation in a centered box."""
     box_width = 54

@@ -63,9 +63,9 @@ class ZHACli:
             if not self._detected_coordinators:
                 # Check if this was a retry that found nothing new
                 if previous_count == 0:
-                    title = "No Coordinators Found"
+                    title = "◆ No Coordinators Found"
                 else:
-                    title = "No New Coordinators Found"
+                    title = "◆ No Coordinators Found"
 
                 options = ["Retry detection", "Settings"]
                 choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
@@ -111,7 +111,7 @@ class ZHACli:
 
     async def _auto_restore_network(self, coordinator: DetectedCoordinator) -> None:
         """Auto-restore a network without selecting it for UI navigation."""
-        async with ui.spinner("Restoring network..."):
+        async with ui.spinner(f"◆ {coordinator.radio_type.pretty_name}"):
             try:
                 gateway = await self._network_manager.start_network(coordinator)
                 self._pairing_manager = DevicePairingManager(gateway)
@@ -127,7 +127,7 @@ class ZHACli:
 
     async def _detect_coordinators_with_spinner(self) -> None:
         """Detect coordinators with a loading spinner."""
-        async with ui.spinner("Detecting coordinators..."):
+        async with ui.spinner("◆ Zigbee"):
             try:
                 self._detected_coordinators = await discover_coordinators()
             except Exception as exc:
@@ -154,22 +154,19 @@ class ZHACli:
             has_network = self._network_manager.has_existing_network(coord)
 
             if is_connected:
-                options.append(f"[green]●[/green] {coord.port} (connected)")
+                status = "connected"
             elif has_network:
-                options.append(f"[yellow]●[/yellow] {coord.port} (saved network)")
+                status = "saved"
             else:
-                options.append(f"[dim]○[/dim] {coord.port} (new)")
+                status = "new"
+            options.append(ui.format_coordinator_option(coord.port, status))
 
         retry_idx = len(options)
         options.append("Retry detection")
         settings_idx = len(options)
         options.append("Settings")
 
-        title = (
-            "Coordinator Found"
-            if len(self._detected_coordinators) == 1
-            else "Coordinators Found"
-        )
+        title = "◆ Zigbee Coordinators"
         choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
 
         if choice in (0, MENU_BACK, MENU_HOME):
@@ -204,7 +201,7 @@ class ZHACli:
             f"Delete all saved networks ({saved_count} saved)",
         ]
 
-        choice = ui.prompt_menu("Settings", options, show_back=True, show_home=True)
+        choice = ui.prompt_menu("◆ Settings", options, show_back=True, show_home=True)
 
         if choice in (0, MENU_BACK):
             return
@@ -259,10 +256,9 @@ class ZHACli:
         has_existing = self._network_manager.has_existing_network(coordinator)
         if has_existing:
             action = "Restoring"
-            spinner_msg = "Restoring network..."
         else:
             action = "Starting"
-            spinner_msg = "Starting network..."
+        spinner_msg = f"◆ {coordinator.radio_type.pretty_name}"
 
         ui.print_info(
             f"{action} network with {coordinator.radio_type.pretty_name} "
@@ -306,7 +302,7 @@ class ZHACli:
             return
 
         coordinator = self._selected_coordinator
-        coord_info = f" - {coordinator.port}" if coordinator else ""
+        coord_name = coordinator.radio_type.pretty_name if coordinator else "Network"
 
         devices = self._network_manager.get_devices()
 
@@ -314,9 +310,8 @@ class ZHACli:
         options: list[str] = []
         if devices:
             for device in devices:
-                status = "[green]●[/green]" if device["available"] else "[red]●[/red]"
                 name = device["name"] or device["model"] or str(device["ieee"])
-                options.append(f"{status} {name}")
+                options.append(ui.format_device_option(name, device["available"]))
 
         # Add action options
         pair_idx = len(options)
@@ -324,7 +319,7 @@ class ZHACli:
         reset_idx = len(options)
         options.append("Reset network")
 
-        title = f"Devices{coord_info}" if devices else f"No Devices{coord_info}"
+        title = f"◆ {coord_name}"
         choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
 
         if choice in (0, MENU_HOME):
@@ -359,7 +354,7 @@ class ZHACli:
         """Enable pairing mode to add new devices."""
         options = ["Start pairing (30 seconds)", "Start pairing (60 seconds)"]
         choice = ui.prompt_menu(
-            "Device Pairing", options, show_back=True, show_home=True
+            "◆ Pair Device", options, show_back=True, show_home=True
         )
 
         if choice in (0, MENU_BACK):
@@ -439,7 +434,7 @@ class ZHACli:
             return entities
 
         # No entities yet - show animated spinner while polling
-        async with ui.spinner("Waiting for device to initialize..."):
+        async with ui.spinner(f"◆ {name}"):
             while elapsed < max_wait:
                 await asyncio.sleep(poll_interval)
                 elapsed += poll_interval
@@ -506,13 +501,12 @@ class ZHACli:
             for info in entity_infos:
                 state = info.get("state", {})
                 is_on = state.get("state") or state.get("on")
-                status = "\\[ON]" if is_on else "\\[OFF]"
                 entity_name = info.get("fallback_name") or info.get(
                     "unique_id", "Unknown"
                 )
-                options.append(f"{entity_name} {status}")
+                options.append(ui.format_entity_option(entity_name, is_on))
 
-            choice = ui.prompt_menu(name, options, show_back=True, show_home=True)
+            choice = ui.prompt_menu(f"◆ {name}", options, show_back=True, show_home=True)
 
             if choice in (0, MENU_BACK):
                 return
