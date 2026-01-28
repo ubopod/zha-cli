@@ -289,44 +289,95 @@ def prompt_menu(
 
 
 def _render_loading_box(message: str, spinner_char: str, box_width: int = 54) -> None:
-    """Render a centered loading box with spinner."""
+    """Render a loading box matching menu dimensions with placeholder buttons."""
     clear_screen()
 
     term_width, term_height = _get_terminal_size()
-    left_margin = max(0, (term_width - box_width) // 2)
-    top_margin = max(0, (term_height - 10) // 2)
+
+    # Match menu dimensions exactly
+    btn_width = 5
+    total_width = btn_width + 2 + box_width + 2 + btn_width
+
+    left_margin = max(0, (term_width - total_width) // 2)
+    top_margin = max(0, (term_height - 20) // 2)
 
     prefix = " " * left_margin
-    inner_width = box_width - 4
+    btn_spacer = " " * btn_width
 
     console.print("\n" * top_margin, end="")
 
-    # Top border
-    console.print(f"{prefix}{BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
+    # === Main box top border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
 
-    # Empty row
-    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+    # === Title row ===
+    title_text = message[: box_width - 4].center(box_width - 2)
+    console.print(
+        f"{prefix}{btn_spacer}  {BOX_V}[bold cyan]{title_text}[/bold cyan]{BOX_V}"
+    )
 
-    # Message row (centered)
-    msg_text = message[: inner_width - 2].center(inner_width)
-    console.print(f"{prefix}{BOX_V} [cyan]{msg_text}[/cyan] {BOX_V}")
+    # === Separator ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
 
-    # Empty row
-    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
 
-    # Spinner row (centered)
-    spinner_text = spinner_char.center(inner_width)
-    console.print(f"{prefix}{BOX_V} [bold yellow]{spinner_text}[/bold yellow] {BOX_V}")
+    # === Three option slot rows with dimmed side buttons ===
+    for i in range(VISIBLE_OPTIONS):
+        # Dimmed numbered buttons on left
+        left_btn = _render_small_box(str(i + 1), btn_width, highlight=False)
 
-    # Empty row
-    console.print(f"{prefix}{BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+        # Dimmed u/d buttons on right
+        if i == 0:
+            right_btn = _render_small_box("u", btn_width, highlight=False)
+        elif i == 2:
+            right_btn = _render_small_box("d", btn_width, highlight=False)
+        else:
+            right_btn = [" " * btn_width] * 3
 
-    # Bottom border
-    console.print(f"{prefix}{BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
+        # Content for middle slot (spinner), empty for others
+        if i == 1:
+            # Spinner in center slot - match option box width (box_width - 4 + 2 = box_width - 2)
+            slot_width = box_width - 2
+            spinner_text = spinner_char.center(slot_width - 2)
+            opt_lines = [
+                " " * slot_width,
+                f" [bold yellow]{spinner_text}[/bold yellow] ",
+                " " * slot_width,
+            ]
+        else:
+            opt_lines = _render_empty_option_slot(box_width - 4)
+
+        for line_idx in range(3):
+            console.print(
+                f"{prefix}{left_btn[line_idx]}  "
+                f"{BOX_V}{opt_lines[line_idx]}{BOX_V}  "
+                f"{right_btn[line_idx]}"
+            )
+
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
+
+    # === Main box bottom border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
+
+    # === Dimmed navigation buttons ===
+    back_btn = _render_small_box("b", 8, highlight=False)
+    home_btn = _render_small_box("h", 8, highlight=False)
+
+    box_start = btn_width + 2
+    box_center = box_start + box_width // 2
+    nav_btn_width = 8
+    btn_gap = 4
+    nav_start = box_center - nav_btn_width - btn_gap // 2
+
+    for line_idx in range(3):
+        console.print(
+            f"{prefix}{' ' * nav_start}{back_btn[line_idx]}{' ' * btn_gap}{home_btn[line_idx]}"
+        )
 
 
 class LoadingSpinner:
-    """A loading spinner context manager that displays in a centered box."""
+    """Async context manager for animated loading spinner."""
 
     SPINNER_CHARS = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
@@ -343,12 +394,13 @@ class LoadingSpinner:
             idx = (idx + 1) % len(self.SPINNER_CHARS)
             await asyncio.sleep(0.1)
 
-    def start(self) -> None:
+    async def __aenter__(self) -> "LoadingSpinner":
         """Start the spinner animation."""
         self._running = True
         self._task = asyncio.create_task(self._animate())
+        return self
 
-    async def stop(self) -> None:
+    async def __aexit__(self, *args: Any) -> None:
         """Stop the spinner animation."""
         self._running = False
         if self._task:
@@ -358,30 +410,14 @@ class LoadingSpinner:
             except asyncio.CancelledError:
                 pass
 
-
-class SpinnerContext:
-    """Synchronous context manager for spinner (renders once)."""
-
-    def __init__(self, message: str) -> None:
+    def update_message(self, message: str) -> None:
+        """Update the spinner message."""
         self.message = message
-        self._task_desc = message
-
-    def __enter__(self) -> "SpinnerContext":
-        _render_loading_box(self.message, "⠋")
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        pass
-
-    def add_task(self, description: str) -> None:
-        """Update the task description (compatibility method)."""
-        self._task_desc = description
-        _render_loading_box(description, "⠋")
 
 
-def spinner(message: str) -> SpinnerContext:
-    """Return a spinner context manager for loading screens."""
-    return SpinnerContext(message)
+def spinner(message: str) -> LoadingSpinner:
+    """Return an async spinner context manager for loading screens."""
+    return LoadingSpinner(message)
 
 
 def print_header(title: str) -> None:

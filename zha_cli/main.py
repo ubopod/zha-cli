@@ -111,8 +111,7 @@ class ZHACli:
 
     async def _auto_restore_network(self, coordinator: DetectedCoordinator) -> None:
         """Auto-restore a network without selecting it for UI navigation."""
-        with ui.spinner("Restoring network...") as progress:
-            progress.add_task("Initializing Zigbee network...")
+        async with ui.spinner("Restoring network..."):
             try:
                 gateway = await self._network_manager.start_network(coordinator)
                 self._pairing_manager = DevicePairingManager(gateway)
@@ -128,8 +127,7 @@ class ZHACli:
 
     async def _detect_coordinators_with_spinner(self) -> None:
         """Detect coordinators with a loading spinner."""
-        with ui.spinner("Detecting coordinators...") as progress:
-            progress.add_task("Scanning serial ports for Zigbee coordinators...")
+        async with ui.spinner("Detecting coordinators..."):
             try:
                 self._detected_coordinators = await discover_coordinators()
             except Exception as exc:
@@ -271,8 +269,7 @@ class ZHACli:
             f"at {coordinator.port}..."
         )
 
-        with ui.spinner(spinner_msg) as progress:
-            progress.add_task("Initializing Zigbee network...")
+        async with ui.spinner(spinner_msg):
             try:
                 gateway = await self._network_manager.start_network(coordinator)
                 self._pairing_manager = DevicePairingManager(gateway)
@@ -429,28 +426,32 @@ class ZHACli:
         """
         poll_interval = 1.0
         elapsed = 0.0
-        shown_waiting = False
 
-        while elapsed < max_wait:
-            fresh_info = self._network_manager.get_device_by_ieee(ieee)
-            if fresh_info is None:
-                ui.show_message("Error", "Device no longer available")
-                return None
+        # Check once before showing spinner
+        fresh_info = self._network_manager.get_device_by_ieee(ieee)
+        if fresh_info is None:
+            ui.show_message("Error", "Device no longer available")
+            return None
 
-            device = fresh_info["device"]
-            entities = DeviceController.get_controllable_entities(device)
+        device = fresh_info["device"]
+        entities = DeviceController.get_controllable_entities(device)
+        if entities:
+            return entities
 
-            if entities:
-                return entities
+        # No entities yet - show animated spinner while polling
+        async with ui.spinner("Waiting for device to initialize..."):
+            while elapsed < max_wait:
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
 
-            # No entities yet - show waiting message on first attempt
-            if not shown_waiting:
-                with ui.spinner("Waiting for device to initialize...") as progress:
-                    progress.add_task("Device is initializing, please wait...")
-                shown_waiting = True
+                fresh_info = self._network_manager.get_device_by_ieee(ieee)
+                if fresh_info is None:
+                    return None  # Will show error after spinner exits
 
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
+                device = fresh_info["device"]
+                entities = DeviceController.get_controllable_entities(device)
+                if entities:
+                    return entities
 
         # Timed out - show diagnostic info
         fresh_info = self._network_manager.get_device_by_ieee(ieee)
