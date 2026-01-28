@@ -367,6 +367,8 @@ class ZHACli:
         options.append("Reset network")
         backup_idx = len(options)
         options.append("Update backup")
+        delete_backup_idx = len(options)
+        options.append("Delete backup")
 
         title = "◆ Zigbee"
         choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
@@ -386,8 +388,18 @@ class ZHACli:
         elif choice == reset_idx + 1:
             await self._reset_network()
         elif choice == backup_idx + 1:
-            async with ui.spinner("◆ Zigbee", status="Creating backup..."):
+            async with ui.spinner("◆ Zigbee", status="Updating backup..."):
                 await self._network_manager.create_backup()
+        elif choice == delete_backup_idx + 1:
+            backups = self._network_manager.get_backups()
+            if not backups:
+                ui.show_message("Info", "No backup to delete")
+            else:
+                confirm = ui.prompt_confirm("Delete the current backup?", default=False)
+                if confirm is None:
+                    self._running = False
+                elif confirm:
+                    await self._network_manager.delete_backup(0)
 
     async def _reset_network(self) -> None:
         """Reset the network completely, deleting all paired devices."""
