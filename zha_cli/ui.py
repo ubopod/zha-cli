@@ -305,7 +305,12 @@ def prompt_menu(
             return MENU_CANCEL
 
 
-def _render_loading_box(message: str, spinner_char: str, box_width: int = 54) -> None:
+def _render_loading_box(
+    message: str,
+    spinner_char: str,
+    status: str | None = None,
+    box_width: int = 54,
+) -> None:
     """Render a loading box matching menu dimensions with placeholder buttons."""
     clear_screen()
 
@@ -338,9 +343,14 @@ def _render_loading_box(message: str, spinner_char: str, box_width: int = 54) ->
     # === Empty row for spacing ===
     console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * (box_width - 2)}{BOX_V}")
 
-    # === Content area with centered spinner (no item borders) ===
+    # === Content area with centered spinner and status ===
     # 9 lines total for the 3 option slot area
     inner_width = box_width - 2
+    # Prepare status text (truncate if needed)
+    status_text = ""
+    if status:
+        status_text = status[: inner_width - 4].center(inner_width)
+
     for line_num in range(9):
         # Dimmed side buttons
         slot_idx = line_num // 3
@@ -355,10 +365,13 @@ def _render_loading_box(message: str, spinner_char: str, box_width: int = 54) ->
 
         btn_line = line_num % 3
 
-        # Center line (line 4 of 9) shows spinner
-        if line_num == 4:
+        # Line 3 (first line of middle slot) shows spinner
+        if line_num == 3:
             padding = (inner_width - 1) // 2
             content = f"{' ' * padding}[bold yellow]{spinner_char}[/bold yellow]{' ' * (inner_width - padding - 1)}"
+        # Line 5 (last line of middle slot) shows status
+        elif line_num == 5 and status:
+            content = f"[dim]{status_text}[/dim]"
         else:
             content = " " * inner_width
 
@@ -395,8 +408,9 @@ class LoadingSpinner:
 
     SPINNER_CHARS = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, status: str | None = None) -> None:
         self.message = message
+        self.status = status
         self._task: asyncio.Task | None = None
         self._running = False
 
@@ -404,7 +418,7 @@ class LoadingSpinner:
         """Animate the spinner."""
         idx = 0
         while self._running:
-            _render_loading_box(self.message, self.SPINNER_CHARS[idx])
+            _render_loading_box(self.message, self.SPINNER_CHARS[idx], self.status)
             idx = (idx + 1) % len(self.SPINNER_CHARS)
             await asyncio.sleep(0.1)
 
@@ -425,13 +439,17 @@ class LoadingSpinner:
                 pass
 
     def update_message(self, message: str) -> None:
-        """Update the spinner message."""
+        """Update the spinner message (title)."""
         self.message = message
 
+    def set_status(self, status: str | None) -> None:
+        """Update the status text shown below the spinner."""
+        self.status = status
 
-def spinner(message: str) -> LoadingSpinner:
+
+def spinner(message: str, status: str | None = None) -> LoadingSpinner:
     """Return an async spinner context manager for loading screens."""
-    return LoadingSpinner(message)
+    return LoadingSpinner(message, status)
 
 
 def print_header(title: str) -> None:

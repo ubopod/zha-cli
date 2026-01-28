@@ -369,11 +369,8 @@ class ZHACli:
 
         duration = 30 if choice == 1 else 60
 
-        ui.print_info(f"Enabling pairing mode for {duration} seconds...")
-        ui.print_info("Put your Zigbee device in pairing mode now")
-
         if self._pairing_manager is None:
-            ui.print_error("Pairing manager not initialized")
+            ui.show_message("◆ Error", "Pairing manager not initialized")
             return
 
         pairing_manager = self._pairing_manager
@@ -382,53 +379,49 @@ class ZHACli:
         new_devices: list[dict[str, Any]] = []
 
         try:
-            await pairing_manager.enable_pairing(duration)
+            async with ui.spinner("◆ Pairing Mode", "Waiting for device...") as spin:
+                await pairing_manager.enable_pairing(duration)
 
-            # Set up event handlers to show progress
-            def on_joined(event: Any) -> None:
-                ui.print_info(f"Device joined: {event.device_info.ieee}")
+                # Set up event handlers to update spinner status
+                def on_joined(event: Any) -> None:
+                    spin.set_status("Device joining...")
 
-            def on_initialized(event: Any) -> None:
+                def on_initialized(event: Any) -> None:
+                    try:
+                        info = event.device_info
+                        device_name = info.model or info.manufacturer or "Device"
+                        spin.set_status(f"Found: {device_name}")
+                        # Only track truly new devices (not re-initialized existing ones)
+                        if getattr(event, "new_join", True):
+                            new_devices.append(
+                                {
+                                    "ieee": str(info.ieee),
+                                    "manufacturer": info.manufacturer,
+                                    "model": info.model,
+                                }
+                            )
+                    except Exception as exc:
+                        _LOGGER.exception("Error in on_initialized callback: %s", exc)
+
+                unsubscribe = pairing_manager.subscribe_to_events(
+                    on_joined=on_joined,
+                    on_initialized=on_initialized,
+                )
+
                 try:
-                    info = event.device_info
-                    ui.print_success(
-                        f"Device initialized: {info.manufacturer} {info.model}"
-                    )
-                    # Only track truly new devices (not re-initialized existing ones)
-                    if getattr(event, "new_join", True):
-                        new_devices.append(
-                            {
-                                "ieee": str(info.ieee),
-                                "manufacturer": info.manufacturer,
-                                "model": info.model,
-                            }
-                        )
-                except Exception as exc:
-                    _LOGGER.exception("Error in on_initialized callback: %s", exc)
-
-            unsubscribe = pairing_manager.subscribe_to_events(
-                on_joined=on_joined,
-                on_initialized=on_initialized,
-            )
-
-            ui.print_info("Waiting for devices... (Press Ctrl+C to stop early)")
-
-            try:
-                await asyncio.sleep(duration)
-            except asyncio.CancelledError:
-                pass
-            finally:
-                unsubscribe()
-                await pairing_manager.disable_pairing()
-
-            ui.print_success("Pairing mode ended")
+                    await asyncio.sleep(duration)
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    unsubscribe()
+                    await pairing_manager.disable_pairing()
 
             # Prompt for names for each new device
             for device in new_devices:
                 await self._prompt_device_name(device)
 
         except Exception as exc:
-            ui.print_error(f"Pairing error: {exc}")
+            ui.show_message("◆ Error", f"Pairing failed: {exc}")
             _LOGGER.exception("Pairing failed")
 
     async def _prompt_device_name(self, device_info: dict[str, Any]) -> None:
