@@ -465,6 +465,10 @@ class ZHACli:
         entities = DeviceController.get_controllable_entities(device)
         if entities:
             return entities
+        # Check if device has monitorable entities (sensors)
+        sensors = DeviceController.get_monitorable_entities(device)
+        if sensors:
+            return entities  # Return empty controllable list; device menu handles sensors
 
         # No entities yet - show animated spinner while polling
         async with ui.spinner(f"◆ {name}"):
@@ -480,6 +484,10 @@ class ZHACli:
                 entities = DeviceController.get_controllable_entities(device)
                 if entities:
                     return entities
+                # Check for monitorable entities (sensors)
+                sensors = DeviceController.get_monitorable_entities(device)
+                if sensors:
+                    return entities  # Return empty controllable list; device menu handles sensors
 
         # Timed out - show diagnostic info
         fresh_info = self._network_manager.get_device_by_ieee(ieee)
@@ -490,7 +498,7 @@ class ZHACli:
         device = fresh_info["device"]
         all_entities = DeviceController.get_all_entities(device)
         if all_entities:
-            msg = f"Device has {len(all_entities)} entities but none are controllable"
+            msg = f"Device has {len(all_entities)} entities but none are supported"
         else:
             msg = "No entities found after waiting. Device may need more time."
         ui.show_message(name, msg)
