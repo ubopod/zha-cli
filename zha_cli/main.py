@@ -433,7 +433,7 @@ class ZHACli:
 
     async def _backup_menu(self) -> None:
         """Display backup management menu."""
-        while True:
+        while self._running:
             backups = self._network_manager.get_backups()
 
             options = []
@@ -740,7 +740,7 @@ class ZHACli:
                 except Exception as exc:
                     _LOGGER.warning("Failed to refresh entities: %s", exc)
 
-        while True:
+        while self._running:
             # Fetch fresh device reference to ensure entities are current
             fresh_info = self._network_manager.get_device_by_ieee(ieee)
             if fresh_info is None:
