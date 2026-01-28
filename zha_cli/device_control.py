@@ -103,14 +103,14 @@ class DeviceController:
             if value is not None:
                 unit = getattr(entity, "native_unit_of_measurement", "") or ""
                 return f"{value} {unit}".strip()
-            return "—"
+            return "Waiting..."
 
         # Device tracker
         if platform == Platform.DEVICE_TRACKER:
             connected = entity.state.get("connected")
             if connected is not None:
                 return str(connected)
-            return "—"
+            return "Waiting..."
 
         # Event - show last event type
         if platform == Platform.EVENT:
@@ -122,7 +122,7 @@ class DeviceController:
         # Fallback - show raw state or dash
         state = entity.state
         if not state:
-            return "—"
+            return "Waiting..."
         return str(state)
 
     @staticmethod
