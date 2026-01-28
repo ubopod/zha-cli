@@ -218,8 +218,9 @@ class NetworkManager:
     async def reset(self, coordinator: DetectedCoordinator | None = None) -> None:
         """Reset the network completely, deleting all persistent data.
 
-        This shuts down the network and deletes the database file,
-        removing all paired devices and network configuration.
+        This resets the coordinator hardware, shuts down the network, and
+        deletes the database file, removing all paired devices and network
+        configuration.
 
         Args:
             coordinator: The coordinator to reset. If None, uses the current coordinator.
@@ -229,7 +230,14 @@ class NetworkManager:
             _LOGGER.warning("No coordinator specified for reset")
             return
 
-        # Shut down first if running
+        # Reset coordinator hardware BEFORE shutting down (requires active gateway)
+        if self._gateway is not None:
+            try:
+                await self._gateway.application_controller.reset_network_info()
+            except Exception:
+                _LOGGER.warning("Failed to reset coordinator hardware", exc_info=True)
+
+        # Shut down and delete database
         if self._gateway is not None:
             await self.shutdown()
 
@@ -340,3 +348,126 @@ class NetworkManager:
                 }
 
         return None
+
+    async def remove_device(self, ieee: str) -> bool:
+        """Remove a device from the network.
+
+        Args:
+            ieee: The IEEE address of the device to remove.
+
+        Returns:
+            True if device was removed successfully, False otherwise.
+        """
+        if self._gateway is None:
+            return False
+
+        # Find the device
+        device = None
+        for dev in self._gateway.devices.values():
+            if str(dev.ieee) == str(ieee):
+                device = dev
+                break
+
+        if device is None:
+            _LOGGER.warning("Device %s not found for removal", ieee)
+            return False
+
+        try:
+            # Remove from the Zigbee network
+            await self._gateway.application_controller.remove(device.ieee)
+            _LOGGER.info("Device %s removed from network", ieee)
+
+            # Remove custom name if exists
+            names = self._load_device_names()
+            if str(ieee) in names:
+                del names[str(ieee)]
+                self._save_device_names(names)
+
+            return True
+        except Exception as exc:
+            _LOGGER.exception("Failed to remove device %s: %s", ieee, exc)
+            return False
+
+    def get_backups(self) -> list[dict]:
+        """Get all backups for the current network.
+
+        Returns:
+            List of dicts with: index, backup_time, device_count, is_complete
+        """
+        if self._gateway is None:
+            return []
+
+        backups = self._gateway.application_controller.backups.backups
+        result = []
+        for i, backup in enumerate(backups):
+            device_count = (
+                len(backup.network_info.nwk_addresses) if backup.network_info else 0
+            )
+            result.append(
+                {
+                    "index": i,
+                    "backup_time": backup.backup_time.strftime("%Y-%m-%d %H:%M"),
+                    "device_count": device_count,
+                    "is_complete": backup.is_complete(),
+                }
+            )
+        return result
+
+    async def create_backup(self) -> dict | None:
+        """Create a new backup of current network state.
+
+        Returns:
+            Info about the created backup, or None if failed.
+        """
+        if self._gateway is None:
+            return None
+
+        backup = await self._gateway.application_controller.backups.create_backup()
+        device_count = (
+            len(backup.network_info.nwk_addresses) if backup.network_info else 0
+        )
+        return {
+            "backup_time": backup.backup_time.strftime("%Y-%m-%d %H:%M"),
+            "device_count": device_count,
+            "is_complete": backup.is_complete(),
+        }
+
+    async def restore_backup(self, index: int) -> None:
+        """Restore network from a specific backup.
+
+        Args:
+            index: The backup index to restore.
+
+        Raises:
+            RuntimeError: If network is not running.
+            ValueError: If backup index is invalid.
+        """
+        if self._gateway is None:
+            raise RuntimeError("Network not running")
+
+        backups = self._gateway.application_controller.backups.backups
+        if index < 0 or index >= len(backups):
+            raise ValueError("Invalid backup index")
+
+        backup = backups[index]
+        await self._gateway.application_controller.backups.restore_backup(backup)
+
+    async def delete_backup(self, index: int) -> None:
+        """Delete a backup by index.
+
+        Args:
+            index: The backup index to delete.
+
+        Raises:
+            RuntimeError: If network is not running.
+            ValueError: If backup index is invalid.
+        """
+        if self._gateway is None:
+            raise RuntimeError("Network not running")
+
+        backups = self._gateway.application_controller.backups.backups
+        if index < 0 or index >= len(backups):
+            raise ValueError("Invalid backup index")
+
+        backup = backups[index]
+        self._gateway.application_controller.backups.backups.remove(backup)

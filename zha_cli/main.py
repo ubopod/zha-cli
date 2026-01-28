@@ -307,8 +307,8 @@ class ZHACli:
         # Add action options
         pair_idx = len(options)
         options.append("Pair new device")
-        rename_idx = len(options)
-        options.append("Rename device")
+        rename_coord_idx = len(options)
+        options.append("Rename coordinator")
         reset_idx = len(options)
         options.append("Reset network")
         backups_idx = len(options)
@@ -327,8 +327,8 @@ class ZHACli:
             await self._control_device_direct(devices[choice - 1])
         elif choice == pair_idx + 1:
             await self._pair_device()
-        elif choice == rename_idx + 1:
-            await self._rename_device_menu()
+        elif choice == rename_coord_idx + 1:
+            await self._rename_coordinator()
         elif choice == reset_idx + 1:
             await self._reset_network()
         elif choice == backups_idx + 1:
@@ -421,45 +421,25 @@ class ZHACli:
             if confirm:
                 await self._network_manager.delete_backup(backup["index"])
 
-    async def _rename_device_menu(self) -> None:
-        """Show device picker for renaming."""
-        devices = self._network_manager.get_devices()
-        if not devices:
-            ui.show_message("Info", "No devices to rename")
+    async def _rename_coordinator(self) -> None:
+        """Rename the current coordinator."""
+        coordinator = self._network_manager.coordinator
+        if coordinator is None:
             return
 
-        # Build device list
-        options: list[str] = []
-        for device in devices:
-            name = device["name"] or device["model"] or str(device["ieee"])
-            options.append(ui.format_device_option(name, device["available"]))
-
-        choice = ui.prompt_menu(
-            "◆ Rename Device", options, show_back=True, show_home=True
+        current_name = self._network_manager.get_coordinator_name(coordinator.port)
+        default_name = (
+            current_name or f"{coordinator.radio_type.pretty_name} Coordinator"
         )
 
-        if choice in (0, MENU_BACK):
-            return
-        if choice == MENU_HOME:
-            self._running = False
-            return
-
-        # Get selected device
-        device_info = devices[choice - 1]
-        ieee = device_info["ieee"]
-        current_name = device_info["name"] or device_info["model"] or str(ieee)
-        manufacturer = device_info.get("manufacturer")
-        model = device_info.get("model")
-
-        # Prompt for new name
-        new_name = ui.prompt_device_name(
-            title="◆ Rename Device",
-            manufacturer=manufacturer,
-            model=model,
-            default=current_name,
+        new_name = ui.prompt_coordinator_name(
+            title="◆ Rename Coordinator",
+            port=coordinator.port,
+            radio_type=coordinator.radio_type.pretty_name,
+            default=default_name,
         )
-        if new_name and new_name != current_name:
-            self._network_manager.set_device_name(ieee, new_name)
+        if new_name:
+            self._network_manager.set_coordinator_name(coordinator.port, new_name)
 
     async def _pair_device(self) -> None:
         """Enable pairing mode to add new devices."""
@@ -709,6 +689,10 @@ class ZHACli:
                 sensors_idx = len(options)
                 options.append(f"View sensors ({len(sensors)})")
 
+            # Add rename device option
+            rename_idx = len(options)
+            options.append("Rename device")
+
             # Add remove device option
             remove_idx = len(options)
             options.append("Remove device")
@@ -726,6 +710,20 @@ class ZHACli:
             if sensors_idx >= 0 and choice == sensors_idx + 1:
                 # View sensors
                 await self._view_sensors(device, name)
+                continue
+
+            if choice == rename_idx + 1:
+                # Rename device
+                current_name = fresh_info.get("name") or model or str(ieee)
+                new_name = ui.prompt_device_name(
+                    title="◆ Rename Device",
+                    manufacturer=manufacturer,
+                    model=model,
+                    default=current_name,
+                )
+                if new_name and new_name != current_name:
+                    self._network_manager.set_device_name(ieee, new_name)
+                    name = new_name  # Update for menu title
                 continue
 
             if choice == remove_idx + 1:

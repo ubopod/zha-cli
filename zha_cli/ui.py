@@ -649,6 +649,18 @@ def format_sensor_option(name: str, value: str) -> str:
     return f"{name}: [cyan]{value}[/cyan]"
 
 
+def format_backup_option(backup_time: str, device_count: int, is_complete: bool) -> str:
+    """Format backup for menu display.
+
+    Args:
+        backup_time: Formatted backup timestamp.
+        device_count: Number of devices in the backup.
+        is_complete: Whether the backup is complete.
+    """
+    status = "" if is_complete else " [yellow]\\[incomplete][/yellow]"
+    return f"{backup_time} ({device_count} devices){status}"
+
+
 def prompt_confirm(
     message: str, default: bool = True, title: str = "Confirm"
 ) -> bool | None:
