@@ -40,8 +40,17 @@ def clear_screen() -> None:
 
 
 def _strip_rich_markup(text: str) -> str:
-    """Remove Rich markup tags from text to get visible content."""
-    return re.sub(r"\[/?[^\]]*\]", "", text)
+    """Remove Rich markup tags and escape sequences to get visible content.
+
+    Handles:
+    - Rich markup tags like [bold], [/bold], [cyan], etc.
+    - Rich escape sequences like \\[ which display as literal [
+    """
+    # First remove markup tags like [bold], [/bold], [cyan], etc.
+    stripped = re.sub(r"\[/?[^\]]*\]", "", text)
+    # Then convert Rich escape sequences: \[ -> [ (backslash-bracket displays as bracket)
+    stripped = stripped.replace("\\[", "[")
+    return stripped
 
 
 def _visible_len(text: str) -> int:
