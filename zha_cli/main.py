@@ -221,10 +221,14 @@ class ZHACli:
             ui.show_message("Info", "No saved networks to delete")
             return
 
-        if not ui.prompt_confirm(
+        confirm = ui.prompt_confirm(
             f"Delete ALL {saved_count} saved network(s)? This cannot be undone.",
             default=False,
-        ):
+        )
+        if confirm is None:  # Home pressed
+            self._running = False
+            return
+        if not confirm:
             return
 
         # Shutdown current network if running
@@ -318,9 +322,13 @@ class ZHACli:
 
     async def _reset_network(self) -> None:
         """Reset the network completely, deleting all paired devices."""
-        if not ui.prompt_confirm(
+        confirm = ui.prompt_confirm(
             "This will DELETE all paired devices. Are you sure?", default=False
-        ):
+        )
+        if confirm is None:  # Home pressed
+            self._running = False
+            return
+        if not confirm:
             return
 
         coordinator = self._network_manager.coordinator

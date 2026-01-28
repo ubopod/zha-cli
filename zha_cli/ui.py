@@ -644,8 +644,14 @@ def format_sensor_option(name: str, value: str) -> str:
     return f"{name}: [cyan]{value}[/cyan]"
 
 
-def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -> bool:
-    """Prompt for confirmation using the standard menu layout."""
+def prompt_confirm(
+    message: str, default: bool = True, title: str = "Confirm"
+) -> bool | None:
+    """Prompt for confirmation using the standard menu layout.
+
+    Returns:
+        True if confirmed, False if cancelled, None if home pressed.
+    """
     box_width = BOX_WIDTH
     btn_width = BTN_WIDTH
 
@@ -736,9 +742,9 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
     # === Main box bottom border ===
     console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
 
-    # === Navigation buttons (back highlighted for cancel) ===
+    # === Navigation buttons (both active) ===
     back_btn = _render_small_box("b", 8, highlight=True)
-    home_btn = _render_small_box("h", 8, highlight=False)
+    home_btn = _render_small_box("h", 8, highlight=True)
 
     box_start = btn_width + 2
     box_center = box_start + box_width // 2
@@ -760,6 +766,8 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
             return True
         if response in ("b", "n", "no"):
             return False
+        if response == "h":
+            return None  # Home pressed
         return default
     except (KeyboardInterrupt, EOFError):
         return False
