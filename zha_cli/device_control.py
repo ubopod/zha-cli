@@ -157,7 +157,9 @@ class DeviceController:
         if device_class:
             # Handle enum values or strings
             class_name = (
-                device_class.value if hasattr(device_class, "value") else str(device_class)
+                device_class.value
+                if hasattr(device_class, "value")
+                else str(device_class)
             )
             return class_name.replace("_", " ").title()
 

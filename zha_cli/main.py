@@ -468,7 +468,9 @@ class ZHACli:
         # Check if device has monitorable entities (sensors)
         sensors = DeviceController.get_monitorable_entities(device)
         if sensors:
-            return entities  # Return empty controllable list; device menu handles sensors
+            return (
+                entities  # Return empty controllable list; device menu handles sensors
+            )
 
         # No entities yet - show animated spinner while polling
         async with ui.spinner(f"◆ {name}"):
