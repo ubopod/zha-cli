@@ -621,14 +621,19 @@ class ZHACli:
 
     async def _view_sensors(self, device: Any, device_name: str) -> None:
         """View sensor values for a device."""
+        # Get sensors once at start
+        sensors = DeviceController.get_monitorable_entities(device)
+
+        if not sensors:
+            ui.show_message(f"◆ {device_name}", "No sensors available")
+            return
+
+        # Refresh all sensors on entry
+        async with ui.spinner(f"◆ {device_name}", status="Reading sensors..."):
+            for sensor in sensors:
+                await DeviceController.refresh_entity(sensor)
+
         while True:
-            # Get fresh sensor readings
-            sensors = DeviceController.get_monitorable_entities(device)
-
-            if not sensors:
-                ui.show_message(f"◆ {device_name}", "No sensors available")
-                return
-
             # Build options showing sensor names and values
             options: list[str] = []
             for sensor in sensors:
@@ -638,6 +643,7 @@ class ZHACli:
                 options.append(ui.format_sensor_option(sensor_name, value))
 
             # Add refresh option
+            refresh_idx = len(options) + 1
             options.append("Refresh readings")
 
             choice = ui.prompt_menu(
@@ -650,8 +656,14 @@ class ZHACli:
                 self._running = False
                 return
 
-            # Any selection just refreshes
-            continue
+            # Refresh readings on explicit request
+            if choice == refresh_idx:
+                async with ui.spinner(
+                    f"◆ {device_name}", status="Refreshing sensors..."
+                ):
+                    for sensor in sensors:
+                        await DeviceController.refresh_entity(sensor)
+            # Loop back to show updated values
 
 
 def setup_logging(verbose: bool = False) -> None:

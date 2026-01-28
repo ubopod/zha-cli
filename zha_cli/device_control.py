@@ -90,49 +90,51 @@ class DeviceController:
             Human-readable state string.
 
         """
-        state = entity.state
         platform = entity.PLATFORM
 
         # Binary sensor
         if platform == Platform.BINARY_SENSOR:
-            is_on = state.get("state", False)
+            is_on = entity.state.get("state", False)
             return "Detected" if is_on else "Clear"
 
-        # Regular sensor - look for common value keys
+        # Regular sensor - use native_value property directly
         if platform == Platform.SENSOR:
-            # Check for native_value (most sensors)
-            if "native_value" in state:
-                value = state["native_value"]
-                unit = state.get("native_unit_of_measurement", "")
-                if value is not None:
-                    return f"{value} {unit}".strip()
-                return "—"
-            # Check for state key
-            if "state" in state:
-                value = state["state"]
-                if value is not None:
-                    return str(value)
-                return "—"
+            value = getattr(entity, "native_value", None)
+            if value is not None:
+                unit = getattr(entity, "native_unit_of_measurement", "") or ""
+                return f"{value} {unit}".strip()
             return "—"
 
         # Device tracker
         if platform == Platform.DEVICE_TRACKER:
-            connected = state.get("connected")
+            connected = entity.state.get("connected")
             if connected is not None:
                 return str(connected)
             return "—"
 
         # Event - show last event type
         if platform == Platform.EVENT:
-            event_type = state.get("event_type")
+            event_type = entity.state.get("event_type")
             if event_type is not None:
                 return f"Last: {event_type}"
             return "No events"
 
-        # Fallback - show dash for empty/None states
+        # Fallback - show raw state or dash
+        state = entity.state
         if not state:
             return "—"
         return str(state)
+
+    @staticmethod
+    async def refresh_entity(entity: PlatformEntity) -> None:
+        """Refresh entity state from device.
+
+        Args:
+            entity: The entity to refresh.
+
+        """
+        if hasattr(entity, "async_update"):
+            await entity.async_update()
 
     @staticmethod
     def get_display_name(entity: PlatformEntity) -> str:
