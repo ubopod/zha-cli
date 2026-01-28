@@ -413,7 +413,8 @@ def prompt_menu(
                 continue
             if response == "d":
                 if scroll_offset + VISIBLE_OPTIONS < total_options:
-                    max_offset = total_options - VISIBLE_OPTIONS
+                    # Always scroll by full page, even if fewer items remain
+                    max_offset = total_options - 1  # At least 1 item visible
                     scroll_offset = min(max_offset, scroll_offset + VISIBLE_OPTIONS)
                 continue
 
