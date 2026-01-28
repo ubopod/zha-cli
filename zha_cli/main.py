@@ -565,7 +565,8 @@ class ZHACli:
             show_entity_names = len(entity_infos) > 1
             for info in entity_infos:
                 state = info.get("state", {})
-                is_on = state.get("state") or state.get("on")
+                # Switch uses "state" key, Light uses "on" key
+                is_on = state.get("state") if "state" in state else state.get("on")
                 entity_name = None
                 if show_entity_names:
                     entity_name = info.get("fallback_name") or info.get(

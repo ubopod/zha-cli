@@ -91,7 +91,8 @@ class DeviceController:
 
         """
         state = entity.state
-        is_on = state.get("state", state.get("on", False))
+        # Switch uses "state" key, Light uses "on" key
+        is_on = state.get("state") if "state" in state else state.get("on", False)
 
         if is_on:
             await DeviceController.turn_off(entity)
