@@ -1031,6 +1031,7 @@ class LiveSensorView:
         self._input_task: asyncio.Task | None = None
         self._poll_task: asyncio.Task | None = None
         self._unsubscribe_handlers: list[Any] = []
+        self._zigpy_clusters: list[Any] = []  # For cleanup of direct listeners
         self._result: int = MENU_BACK
         self._needs_render = True
 
@@ -1056,6 +1057,25 @@ class LiveSensorView:
     def _on_any_cluster_event(self, event_name: str, event: Any) -> None:
         """Debug handler for all cluster handler events."""
         _LOGGER.debug("CLUSTER_HANDLER_EVENT: %s -> %s", event_name, event)
+
+    def attribute_updated(self, attrid: int, value: Any, timestamp: Any) -> None:
+        """Zigpy cluster listener callback for attribute updates."""
+        _LOGGER.debug(
+            "ZIGPY_ATTRIBUTE_UPDATED: attrid=%s, value=%s, timestamp=%s",
+            attrid,
+            value,
+            timestamp,
+        )
+        self._needs_render = True
+
+    def cluster_command(self, tsn: Any, command_id: Any, args: Any) -> None:
+        """Zigpy cluster listener callback for cluster commands."""
+        _LOGGER.debug(
+            "ZIGPY_CLUSTER_COMMAND: tsn=%s, command_id=%s, args=%s",
+            tsn,
+            command_id,
+            args,
+        )
 
     async def _render_loop(self) -> None:
         """Render loop that updates display when needed."""
@@ -1202,6 +1222,15 @@ class LiveSensorView:
                     )
                     self._unsubscribe_handlers.append(unsub_all)
                     _LOGGER.debug("  Also subscribed to ALL events for debugging")
+                # Debug: subscribe directly to zigpy cluster as listener
+                zigpy_cluster = getattr(cluster_handler, "cluster", None)
+                if zigpy_cluster is not None and hasattr(zigpy_cluster, "add_listener"):
+                    zigpy_cluster.add_listener(self)
+                    self._zigpy_clusters.append(zigpy_cluster)
+                    _LOGGER.debug(
+                        "  Added as direct listener to zigpy cluster: %s",
+                        zigpy_cluster.name,
+                    )
             else:
                 _LOGGER.debug("  Sensor %s has no cluster handler", sensor_name)
 
@@ -1235,6 +1264,13 @@ class LiveSensorView:
             for unsub in self._unsubscribe_handlers:
                 try:
                     unsub()
+                except Exception:
+                    pass
+
+            # Remove ourselves as listener from zigpy clusters
+            for cluster in self._zigpy_clusters:
+                try:
+                    cluster.remove_listener(self)
                 except Exception:
                     pass
 
