@@ -1053,6 +1053,10 @@ class LiveSensorView:
         _LOGGER.debug("CLUSTER_HANDLER_ATTRIBUTE_UPDATED: %s", event)
         self._needs_render = True
 
+    def _on_any_cluster_event(self, event_name: str, event: Any) -> None:
+        """Debug handler for all cluster handler events."""
+        _LOGGER.debug("CLUSTER_HANDLER_EVENT: %s -> %s", event_name, event)
+
     async def _render_loop(self) -> None:
         """Render loop that updates display when needed."""
         while self._running:
@@ -1166,6 +1170,11 @@ class LiveSensorView:
             # Access the cluster handler via the sensor's internal reference
             if hasattr(sensor, "_cluster_handler"):
                 cluster_handler = sensor._cluster_handler
+                _LOGGER.debug(
+                    "  Cluster handler type: %s, id: %s",
+                    type(cluster_handler).__name__,
+                    getattr(cluster_handler, "unique_id", "unknown"),
+                )
                 if hasattr(cluster_handler, "on_event"):
                     unsub = cluster_handler.on_event(
                         CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
@@ -1175,6 +1184,13 @@ class LiveSensorView:
                     _LOGGER.debug(
                         "  Subscribed to cluster handler for: %s", sensor_name
                     )
+                # Debug: subscribe to ALL events to see what's emitted
+                if hasattr(cluster_handler, "on_all_events"):
+                    unsub_all = cluster_handler.on_all_events(
+                        self._on_any_cluster_event, with_context=True
+                    )
+                    self._unsubscribe_handlers.append(unsub_all)
+                    _LOGGER.debug("  Also subscribed to ALL events for debugging")
             else:
                 _LOGGER.debug("  Sensor %s has no cluster handler", sensor_name)
 
