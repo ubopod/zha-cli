@@ -92,11 +92,15 @@ def _render_small_box(text: str, width: int = 5, highlight: bool = True) -> list
 
 
 def _render_option_box(text: str, width: int, highlighted: bool = False) -> list[str]:
-    """Render an option box flush left with more right padding."""
-    # Box is flush left (no left padding), with 4 spaces right padding
+    """Render an option box that merges with the main box's left border.
+
+    Uses T-junctions (├) on top/bottom to connect to the main box's left edge.
+    The left │ of the content row IS the main box's left border.
+    """
+    # Box merges with main box left border, 4 spaces right padding
     right_padding = 4
     box_width = width - right_padding  # total box width including borders
-    horiz_width = box_width - 2  # horizontal line width (minus corners)
+    horiz_width = box_width - 2  # horizontal line width (minus junction and corner)
     text_width = horiz_width - 2  # text area (minus spaces around text)
 
     display_text = _fit_text(text, text_width)
@@ -108,21 +112,25 @@ def _render_option_box(text: str, width: int, highlighted: bool = False) -> list
         start = ""
         end = ""
 
-    # Box flush left, padded right
+    # Left T-junction merges with main box, rounded corners on right
     return [
-        f"{start}{BOX_TL}{BOX_H * horiz_width}{BOX_TR}{end}{' ' * right_padding}",
+        f"{start}{BOX_LT}{BOX_H * horiz_width}{BOX_TR}{end}{' ' * right_padding}",
         f"{start}{BOX_V} {display_text} {BOX_V}{end}{' ' * right_padding}",
-        f"{start}{BOX_BL}{BOX_H * horiz_width}{BOX_BR}{end}{' ' * right_padding}",
+        f"{start}{BOX_LT}{BOX_H * horiz_width}{BOX_BR}{end}{' ' * right_padding}",
     ]
 
 
 def _render_empty_option_slot(width: int) -> list[str]:
-    """Render empty space for an option slot."""
-    # Match the visual width of _render_option_box (same as width parameter)
+    """Render empty space for an option slot.
+
+    Includes the main box's left border │ since option rows don't print it separately.
+    """
+    # Start with │ (main box left border), then spaces to fill width
+    inner_width = width - 1  # minus the left border
     return [
-        " " * width,
-        " " * width,
-        " " * width,
+        f"{BOX_V}{' ' * inner_width}",
+        f"{BOX_V}{' ' * inner_width}",
+        f"{BOX_V}{' ' * inner_width}",
     ]
 
 
@@ -198,10 +206,11 @@ def _render_menu_box(
             right_btn = [" " * btn_width] * 3
 
         # Print all 3 lines for this option
+        # Option box includes left border (├/│) that merges with main box
         for line_idx in range(3):
             console.print(
                 f"{prefix}{left_btn[line_idx]}  "
-                f"{BOX_V}{opt_box[line_idx]}{BOX_V}  "
+                f"{opt_box[line_idx]}{BOX_V}  "
                 f"{right_btn[line_idx]}"
             )
 
@@ -349,24 +358,26 @@ def _render_loading_box(message: str, spinner_char: str, box_width: int = 54) ->
 
         # Content for middle slot (spinner), empty for others
         if i == 1:
-            # Spinner box flush left with right padding (matching option box layout)
+            # Spinner box merges with main box left border (matching option box layout)
             slot_width = box_width - 2  # matches main box interior width
             right_padding = 4
             inner_box_width = slot_width - right_padding
             horiz_width = inner_box_width - 2
             spinner_text = spinner_char.center(horiz_width)
+            # Use T-junctions on left to merge with main box
             opt_lines = [
-                f"[dim]{BOX_TL}{BOX_H * horiz_width}{BOX_TR}[/dim]{' ' * right_padding}",
+                f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_TR}[/dim]{' ' * right_padding}",
                 f"[dim]{BOX_V}[/dim][bold yellow]{spinner_text}[/bold yellow][dim]{BOX_V}[/dim]{' ' * right_padding}",
-                f"[dim]{BOX_BL}{BOX_H * horiz_width}{BOX_BR}[/dim]{' ' * right_padding}",
+                f"[dim]{BOX_LT}{BOX_H * horiz_width}{BOX_BR}[/dim]{' ' * right_padding}",
             ]
         else:
             opt_lines = _render_empty_option_slot(box_width - 2)
 
+        # Option box includes left border (├/│) that merges with main box
         for line_idx in range(3):
             console.print(
                 f"{prefix}{left_btn[line_idx]}  "
-                f"{BOX_V}{opt_lines[line_idx]}{BOX_V}  "
+                f"{opt_lines[line_idx]}{BOX_V}  "
                 f"{right_btn[line_idx]}"
             )
 
