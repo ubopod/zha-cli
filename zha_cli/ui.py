@@ -12,6 +12,12 @@ from rich.console import Console
 
 _LOGGER = logging.getLogger(__name__)
 
+# Import cluster handler event constant for responsive sensor updates
+try:
+    from zha.zigbee.cluster_handlers.const import CLUSTER_HANDLER_ATTRIBUTE_UPDATED
+except ImportError:
+    CLUSTER_HANDLER_ATTRIBUTE_UPDATED = "cluster_handler_attribute_updated"
+
 console = Console()
 
 # Track whether screen has been initialized (first render needs full clear)
@@ -1042,6 +1048,11 @@ class LiveSensorView:
         _LOGGER.debug("STATE_CHANGED event received: %s", event)
         self._needs_render = True
 
+    def _on_attribute_updated(self, event: Any) -> None:
+        """Handle cluster handler attribute update event."""
+        _LOGGER.debug("CLUSTER_HANDLER_ATTRIBUTE_UPDATED: %s", event)
+        self._needs_render = True
+
     async def _render_loop(self) -> None:
         """Render loop that updates display when needed."""
         while self._running:
@@ -1057,7 +1068,7 @@ class LiveSensorView:
         Many Zigbee devices don't push attribute reports, so we need to
         actively poll them to get updated values.
         """
-        poll_interval = 5.0  # seconds between polls
+        poll_interval = 15.0  # seconds between polls (fallback only)
         while self._running:
             await asyncio.sleep(poll_interval)
             if not self._running:
@@ -1147,6 +1158,25 @@ class LiveSensorView:
                 _LOGGER.debug("  Subscribed to sensor: %s (has on_event)", sensor_name)
             else:
                 _LOGGER.debug("  Sensor %s has no on_event method", sensor_name)
+
+        # Subscribe to cluster handler events for immediate updates
+        _LOGGER.debug("Subscribing to cluster handler events for responsive updates")
+        for sensor in self.sensors:
+            sensor_name = self.get_display_name(sensor)
+            # Access the cluster handler via the sensor's internal reference
+            if hasattr(sensor, "_cluster_handler"):
+                cluster_handler = sensor._cluster_handler
+                if hasattr(cluster_handler, "on_event"):
+                    unsub = cluster_handler.on_event(
+                        CLUSTER_HANDLER_ATTRIBUTE_UPDATED,
+                        self._on_attribute_updated,
+                    )
+                    self._unsubscribe_handlers.append(unsub)
+                    _LOGGER.debug(
+                        "  Subscribed to cluster handler for: %s", sensor_name
+                    )
+            else:
+                _LOGGER.debug("  Sensor %s has no cluster handler", sensor_name)
 
         self._running = True
         self._needs_render = True
