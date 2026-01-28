@@ -532,23 +532,24 @@ class ZHACli:
 
             device = fresh_info["device"]
 
-            # Get controllable entities
+            # Get controllable and monitorable entities
             entities = DeviceController.get_controllable_entities(device)
+            sensors = DeviceController.get_monitorable_entities(device)
 
-            if not entities:
+            if not entities and not sensors:
                 # Show diagnostic info
                 all_entities = DeviceController.get_all_entities(device)
                 if all_entities:
-                    msg = f"Device has {len(all_entities)} entities but none are controllable"
+                    msg = f"Device has {len(all_entities)} entities but none are supported"
                 else:
                     msg = "No entities found. Device may still be initializing."
                 ui.show_message(name, msg)
                 return
 
-            # Build options: one per entity for toggle, plus rename option
-            entity_infos = [DeviceController.get_entity_info(e) for e in entities]
+            # Build options: controllable entities first
             options: list[str] = []
-            # Only show entity names if there are multiple entities
+            entity_infos = [DeviceController.get_entity_info(e) for e in entities]
+            # Only show entity names if there are multiple controllable entities
             show_entity_names = len(entity_infos) > 1
             for info in entity_infos:
                 state = info.get("state", {})
@@ -560,6 +561,12 @@ class ZHACli:
                         "unique_id", "Unknown"
                     )
                 options.append(ui.format_entity_option(entity_name, is_on))
+
+            # Add sensors option if there are monitorable entities
+            sensors_idx = -1
+            if sensors:
+                sensors_idx = len(options)
+                options.append(f"View sensors ({len(sensors)})")
 
             # Add rename option at the end
             rename_idx = len(options)
@@ -589,14 +596,56 @@ class ZHACli:
                     ui.print_success(f"Device renamed to: {name}")
                 continue
 
+            if sensors_idx >= 0 and choice == sensors_idx + 1:
+                # View sensors
+                await self._view_sensors(device, name)
+                continue
+
             # Toggle the selected entity
-            selected_entity = entities[choice - 1]
-            try:
-                await DeviceController.toggle(selected_entity)
-                ui.print_success("Device toggled")
-            except Exception as exc:
-                ui.print_error(f"Control error: {exc}")
-                _LOGGER.exception("Control failed")
+            if choice <= len(entities):
+                selected_entity = entities[choice - 1]
+                try:
+                    await DeviceController.toggle(selected_entity)
+                    ui.print_success("Device toggled")
+                except Exception as exc:
+                    ui.print_error(f"Control error: {exc}")
+                    _LOGGER.exception("Control failed")
+
+    async def _view_sensors(self, device: Any, device_name: str) -> None:
+        """View sensor values for a device."""
+        while True:
+            # Get fresh sensor readings
+            sensors = DeviceController.get_monitorable_entities(device)
+
+            if not sensors:
+                ui.show_message(f"◆ {device_name}", "No sensors available")
+                return
+
+            # Build options showing sensor names and values
+            options: list[str] = []
+            for sensor in sensors:
+                info = DeviceController.get_entity_info(sensor)
+                sensor_name = info.get("fallback_name") or info.get(
+                    "unique_id", "Unknown"
+                )
+                value = DeviceController.format_entity_state(sensor)
+                options.append(ui.format_sensor_option(sensor_name, value))
+
+            # Add refresh option
+            options.append("Refresh readings")
+
+            choice = ui.prompt_menu(
+                f"◆ {device_name} Sensors", options, show_back=True, show_home=True
+            )
+
+            if choice in (0, MENU_BACK):
+                return
+            if choice == MENU_HOME:
+                self._running = False
+                return
+
+            # Any selection just refreshes
+            continue
 
 
 def setup_logging(verbose: bool = False) -> None:

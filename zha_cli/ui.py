@@ -39,6 +39,11 @@ def clear_screen() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
 
+def _move_cursor_home() -> None:
+    """Move cursor to top-left without clearing screen."""
+    print("\033[H", end="", flush=True)
+
+
 def _strip_rich_markup(text: str) -> str:
     """Remove Rich markup tags and escape sequences to get visible content.
 
@@ -310,9 +315,13 @@ def _render_loading_box(
     spinner_char: str,
     status: str | None = None,
     box_width: int = 54,
+    clear: bool = True,
 ) -> None:
     """Render a loading box matching menu dimensions with placeholder buttons."""
-    clear_screen()
+    if clear:
+        clear_screen()
+    else:
+        _move_cursor_home()
 
     term_width, term_height = _get_terminal_size()
 
@@ -413,12 +422,19 @@ class LoadingSpinner:
         self.status = status
         self._task: asyncio.Task | None = None
         self._running = False
+        self._first_frame = True
 
     async def _animate(self) -> None:
         """Animate the spinner."""
         idx = 0
         while self._running:
-            _render_loading_box(self.message, self.SPINNER_CHARS[idx], self.status)
+            _render_loading_box(
+                self.message,
+                self.SPINNER_CHARS[idx],
+                self.status,
+                clear=self._first_frame,
+            )
+            self._first_frame = False
             idx = (idx + 1) % len(self.SPINNER_CHARS)
             await asyncio.sleep(0.1)
 
@@ -577,6 +593,14 @@ def format_entity_option(name: str | None, is_on: bool | None) -> str:
     if name:
         return f"[{style}]{action}[/{style}] {name}"
     return f"[{style}]{action}[/{style}]"
+
+
+def format_sensor_option(name: str, value: str) -> str:
+    """Format sensor for menu display.
+
+    Shows the sensor name and its current value.
+    """
+    return f"{name}: [cyan]{value}[/cyan]"
 
 
 def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -> bool:

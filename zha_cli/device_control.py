@@ -16,6 +16,14 @@ _LOGGER = logging.getLogger(__name__)
 # Platforms that support on/off control
 CONTROLLABLE_PLATFORMS = {Platform.SWITCH, Platform.LIGHT}
 
+# Platforms that are monitorable (read-only sensors and status)
+MONITORABLE_PLATFORMS = {
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.DEVICE_TRACKER,
+    Platform.EVENT,
+}
+
 
 class DeviceController:
     """Controls device entities."""
@@ -51,6 +59,70 @@ class DeviceController:
 
         """
         return list(device.platform_entities.values())
+
+    @staticmethod
+    def get_monitorable_entities(device: Device) -> list[PlatformEntity]:
+        """Get entities that can be monitored (sensors, binary sensors, etc.).
+
+        Args:
+            device: The ZHA device.
+
+        Returns:
+            List of entities that report state but can't be controlled.
+
+        """
+        entities: list[PlatformEntity] = []
+
+        for (platform, _unique_id), entity in device.platform_entities.items():
+            if platform in MONITORABLE_PLATFORMS:
+                entities.append(entity)
+
+        return entities
+
+    @staticmethod
+    def format_entity_state(entity: PlatformEntity) -> str:
+        """Format entity state for display.
+
+        Args:
+            entity: The entity to format.
+
+        Returns:
+            Human-readable state string.
+
+        """
+        state = entity.state
+        platform = entity.PLATFORM
+
+        # Binary sensor
+        if platform == Platform.BINARY_SENSOR:
+            is_on = state.get("state", False)
+            return "Detected" if is_on else "Clear"
+
+        # Regular sensor - look for common value keys
+        if platform == Platform.SENSOR:
+            # Check for native_value (most sensors)
+            if "native_value" in state:
+                value = state["native_value"]
+                unit = state.get("native_unit_of_measurement", "")
+                if value is not None:
+                    return f"{value} {unit}".strip()
+                return "Unknown"
+            # Check for state key
+            if "state" in state:
+                return str(state["state"])
+            return "Unknown"
+
+        # Device tracker
+        if platform == Platform.DEVICE_TRACKER:
+            return state.get("connected", "Unknown")
+
+        # Event - show last event type
+        if platform == Platform.EVENT:
+            event_type = state.get("event_type", "None")
+            return f"Last: {event_type}"
+
+        # Fallback - show raw state
+        return str(state)
 
     @staticmethod
     async def turn_on(entity: PlatformEntity) -> None:
