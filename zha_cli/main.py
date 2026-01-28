@@ -81,14 +81,11 @@ class ZHACli:
                         coord = coords_with_network[0]
                         # Skip if already running on this coordinator
                         current = self._network_manager.coordinator
-                        if (
+                        if not (
                             current is not None
                             and current.port == coord.port
                             and self._network_manager.is_running
                         ):
-                            ui.print_info(f"Network already running on {coord.port}")
-                        else:
-                            ui.print_info(f"Restoring network on {coord.port}...")
                             await self._auto_restore_network(coord)
                         auto_restored = True
 
@@ -103,18 +100,16 @@ class ZHACli:
 
     async def _auto_restore_network(self, coordinator: DetectedCoordinator) -> None:
         """Auto-restore a network without selecting it for UI navigation."""
-        async with ui.spinner("◆ Zigbee"):
+        async with ui.spinner("◆ Zigbee") as spin:
             try:
                 gateway = await self._network_manager.start_network(coordinator)
                 self._pairing_manager = DevicePairingManager(gateway)
+                devices = self._network_manager.get_devices()
+                spin.set_status(f"Restored! {len(devices)} device(s)")
+                await asyncio.sleep(0.5)  # Brief pause to show status
             except Exception as exc:
-                ui.print_error(f"Failed to restore network: {exc}")
                 _LOGGER.exception("Network restore failed")
-                return
-
-        ui.print_success("Network restored!")
-        devices = self._network_manager.get_devices()
-        ui.print_info(f"Found {len(devices)} paired device(s)")
+                ui.show_message("Error", f"Failed to restore network: {exc}")
 
     async def _detect_coordinators_with_spinner(self) -> None:
         """Detect coordinators with a loading spinner.
@@ -125,12 +120,17 @@ class ZHACli:
         # Remember the currently connected coordinator (its port is locked)
         current_coord = self._network_manager.coordinator
 
+        error_msg = None
         async with ui.spinner("◆ Zigbee"):
             try:
                 detected = await discover_coordinators()
             except Exception as exc:
-                ui.print_error(f"Error detecting coordinators: {exc}")
+                _LOGGER.exception("Error detecting coordinators")
+                error_msg = str(exc)
                 detected = []
+
+        if error_msg:
+            ui.show_message("Error", f"Detection failed: {error_msg}")
 
         # If we have a connected coordinator, ensure it's in the list
         if current_coord is not None and self._network_manager.is_running:
@@ -218,7 +218,7 @@ class ZHACli:
         """Delete all saved network databases."""
         saved_count = self._network_manager.get_saved_network_count()
         if saved_count == 0:
-            ui.print_warning("No saved networks to delete")
+            ui.show_message("Info", "No saved networks to delete")
             return
 
         if not ui.prompt_confirm(
@@ -233,7 +233,7 @@ class ZHACli:
             self._pairing_manager = None
 
         deleted = self._network_manager.delete_all_networks()
-        ui.print_success(f"Deleted {deleted} saved network(s)")
+        ui.show_message("Success", f"Deleted {deleted} saved network(s)")
 
     async def _ensure_network_started(self, coordinator: DetectedCoordinator) -> bool:
         """Ensure the network is started, auto-starting if needed.
@@ -245,41 +245,27 @@ class ZHACli:
         if self._network_manager.is_running:
             if current_coord is not None and current_coord.port == coordinator.port:
                 # Already running on correct coordinator
-                ui.print_success("Network is already running")
-                devices = self._network_manager.get_devices()
-                ui.print_info(f"Found {len(devices)} paired device(s)")
                 return True
             else:
                 # Different coordinator - shut down current first
-                ui.print_info("Switching coordinators...")
                 await self._network_manager.shutdown()
 
         # Check if we're restoring an existing network
         has_existing = self._network_manager.has_existing_network(coordinator)
-        if has_existing:
-            action = "Restoring"
-        else:
-            action = "Starting"
-        spinner_msg = "◆ Zigbee"
 
-        ui.print_info(f"{action} Zigbee network at {coordinator.port}...")
-
-        async with ui.spinner(spinner_msg):
+        async with ui.spinner("◆ Zigbee") as spin:
             try:
                 gateway = await self._network_manager.start_network(coordinator)
                 self._pairing_manager = DevicePairingManager(gateway)
+                devices = self._network_manager.get_devices()
+                status = "Restored" if has_existing else "Started"
+                spin.set_status(f"{status}! {len(devices)} device(s)")
+                await asyncio.sleep(0.5)  # Brief pause to show status
             except Exception as exc:
-                ui.print_error(f"Failed to start network: {exc}")
                 _LOGGER.exception("Network start failed")
+                ui.show_message("Error", f"Failed to start network: {exc}")
                 return False
 
-        if has_existing:
-            ui.print_success("Network restored successfully!")
-        else:
-            ui.print_success("Network started successfully!")
-
-        devices = self._network_manager.get_devices()
-        ui.print_info(f"Found {len(devices)} paired device(s)")
         return True
 
     def _signal_handler(self) -> None:
@@ -288,9 +274,9 @@ class ZHACli:
 
     async def _cleanup(self) -> None:
         """Clean up resources."""
-        ui.print_info("Shutting down...")
         await self._network_manager.shutdown()
-        ui.print_success("Goodbye!")
+        # Clear screen on exit to leave terminal clean
+        ui.clear_screen()
 
     async def _main_menu(self) -> None:
         """Display and handle the main menu (device management)."""
@@ -338,10 +324,11 @@ class ZHACli:
             return
 
         coordinator = self._network_manager.coordinator
-        ui.print_info("Resetting network and deleting all device data...")
-        await self._network_manager.reset(coordinator)
-        self._pairing_manager = None
-        ui.print_success("Network has been completely reset")
+        async with ui.spinner("◆ Zigbee") as spin:
+            await self._network_manager.reset(coordinator)
+            self._pairing_manager = None
+            spin.set_status("Network reset complete")
+            await asyncio.sleep(0.5)
 
     async def _pair_device(self) -> None:
         """Enable pairing mode to add new devices."""
@@ -431,7 +418,6 @@ class ZHACli:
 
         if name:
             self._network_manager.set_device_name(ieee, name)
-            ui.print_success(f"Device named: {name}")
 
     async def _wait_for_entities(
         self, ieee: str, name: str, max_wait: float = 10.0
@@ -593,7 +579,6 @@ class ZHACli:
                 if new_name and new_name != name:
                     self._network_manager.set_device_name(ieee, new_name)
                     name = new_name
-                    ui.print_success(f"Device renamed to: {name}")
                 continue
 
             if sensors_idx >= 0 and choice == sensors_idx + 1:
@@ -606,9 +591,8 @@ class ZHACli:
                 selected_entity = entities[choice - 1]
                 try:
                     await DeviceController.toggle(selected_entity)
-                    ui.print_success("Device toggled")
                 except Exception as exc:
-                    ui.print_error(f"Control error: {exc}")
+                    ui.show_message("Error", f"Control failed: {exc}")
                     _LOGGER.exception("Control failed")
 
     async def _view_sensors(self, device: Any, device_name: str) -> None:
