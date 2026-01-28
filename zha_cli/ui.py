@@ -1023,6 +1023,7 @@ class LiveSensorView:
         self._running = False
         self._render_task: asyncio.Task | None = None
         self._input_task: asyncio.Task | None = None
+        self._poll_task: asyncio.Task | None = None
         self._unsubscribe_handlers: list[Any] = []
         self._result: int = MENU_BACK
         self._needs_render = True
@@ -1049,6 +1050,26 @@ class LiveSensorView:
                 sensor_data = self._get_sensor_data()
                 _render_live_sensor_box(self.title, sensor_data, self._scroll_offset)
             await asyncio.sleep(0.1)
+
+    async def _poll_loop(self) -> None:
+        """Poll sensors periodically to get fresh values.
+
+        Many Zigbee devices don't push attribute reports, so we need to
+        actively poll them to get updated values.
+        """
+        poll_interval = 5.0  # seconds between polls
+        while self._running:
+            await asyncio.sleep(poll_interval)
+            if not self._running:
+                break
+            _LOGGER.debug("Polling %d sensors for updates", len(self.sensors))
+            for sensor in self.sensors:
+                if hasattr(sensor, "async_update"):
+                    try:
+                        await sensor.async_update()
+                    except Exception as exc:
+                        _LOGGER.debug("Failed to poll sensor: %s", exc)
+            self._needs_render = True
 
     async def _input_loop(self) -> None:
         """Handle keyboard input in a non-blocking way."""
@@ -1130,32 +1151,28 @@ class LiveSensorView:
         self._running = True
         self._needs_render = True
 
-        # Start render and input tasks
+        # Start render, input, and poll tasks
         self._render_task = asyncio.create_task(self._render_loop())
         self._input_task = asyncio.create_task(self._input_loop())
+        self._poll_task = asyncio.create_task(self._poll_loop())
 
         try:
-            # Wait for either task to complete (input loop exits on user action)
-            await asyncio.gather(self._render_task, self._input_task)
+            # Wait for input task to complete (exits on user action)
+            # Render and poll tasks run until stopped
+            await self._input_task
         except asyncio.CancelledError:
             pass
         finally:
             self._running = False
 
-            # Cancel tasks
-            if self._render_task and not self._render_task.done():
-                self._render_task.cancel()
-                try:
-                    await self._render_task
-                except asyncio.CancelledError:
-                    pass
-
-            if self._input_task and not self._input_task.done():
-                self._input_task.cancel()
-                try:
-                    await self._input_task
-                except asyncio.CancelledError:
-                    pass
+            # Cancel all tasks
+            for task in [self._render_task, self._input_task, self._poll_task]:
+                if task and not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
 
             # Unsubscribe from events
             for unsub in self._unsubscribe_handlers:
