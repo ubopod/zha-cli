@@ -275,7 +275,8 @@ class ZHACli:
                 # Show backup count if this is the connected coordinator
                 if current_coord and coord.port == current_coord.port:
                     backup_count = len(self._network_manager.get_backups())
-                    options.append(f"{display_name} ({backup_count} backups)")
+                    backup_label = "backup" if backup_count == 1 else "backups"
+                    options.append(f"{display_name} ({backup_count} {backup_label})")
                 else:
                     options.append(f"{display_name} (saved)")
 
@@ -365,7 +366,7 @@ class ZHACli:
         reset_idx = len(options)
         options.append("Reset network")
         backup_idx = len(options)
-        options.append("Create new backup")
+        options.append("Update backup")
 
         title = "◆ Zigbee"
         choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
@@ -420,7 +421,7 @@ class ZHACli:
                 )
 
             # Add action at bottom
-            options.append("Create new backup")
+            options.append("Update backup")
 
             choice = ui.prompt_menu(
                 "◆ Backups", options, show_back=True, show_home=True
