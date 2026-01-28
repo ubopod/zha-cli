@@ -876,3 +876,302 @@ def show_message(title: str, message: str, wait: bool = True) -> None:
             input()
         except (KeyboardInterrupt, EOFError):
             pass
+
+
+def _render_live_sensor_box(
+    title: str,
+    sensor_data: list[tuple[str, str]],
+    scroll_offset: int = 0,
+    box_width: int = BOX_WIDTH,
+) -> None:
+    """Render a live sensor display box with smooth updates.
+
+    Args:
+        title: The title for the box.
+        sensor_data: List of (name, value) tuples for sensors.
+        scroll_offset: Current scroll position.
+        box_width: Width of the main box.
+    """
+    _prepare_screen(use_cursor_home=True)  # Smooth updates
+
+    term_width, term_height = _get_terminal_size()
+    btn_width = BTN_WIDTH
+    total_width = btn_width + 2 + box_width + 2 + btn_width
+
+    left_margin = max(0, (term_width - total_width) // 2)
+    top_margin = max(0, (term_height - 20) // 2)
+
+    prefix = " " * left_margin
+    btn_spacer = " " * btn_width
+    inner_width = box_width - 2
+
+    console.print("\n" * top_margin, end="")
+
+    # === Main box top border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_TL}{BOX_H * (box_width - 2)}{BOX_TR}")
+
+    # === Title row ===
+    title_text = title[: box_width - 4].center(box_width - 2)
+    console.print(
+        f"{prefix}{btn_spacer}  {BOX_V}[bold cyan]{title_text}[/bold cyan]{BOX_V}"
+    )
+
+    # === Separator ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_LT}{BOX_H * (box_width - 2)}{BOX_RT}")
+
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * inner_width}{BOX_V}")
+
+    # Prepare visible sensors
+    total_sensors = len(sensor_data)
+    visible_sensors = sensor_data[scroll_offset : scroll_offset + VISIBLE_OPTIONS]
+    while len(visible_sensors) < VISIBLE_OPTIONS:
+        visible_sensors.append(None)  # type: ignore
+
+    can_scroll_up = scroll_offset > 0
+    can_scroll_down = scroll_offset + VISIBLE_OPTIONS < total_sensors
+
+    # === Sensor rows ===
+    for i, sensor in enumerate(visible_sensors):
+        slot_idx = i
+        left_btn = _render_small_box(
+            str(slot_idx + 1), btn_width, highlight=(sensor is not None)
+        )
+
+        if slot_idx == 0:
+            right_btn = _render_small_box("u", btn_width, highlight=can_scroll_up)
+        elif slot_idx == 2:
+            right_btn = _render_small_box("d", btn_width, highlight=can_scroll_down)
+        else:
+            right_btn = [" " * btn_width] * 3
+
+        if sensor is not None:
+            name, value = sensor
+            # Format: "Name: value" with value highlighted
+            display = f"{name}: [cyan]{value}[/cyan]"
+            opt_box = _render_option_box(display, box_width - 1)
+        else:
+            opt_box = _render_empty_option_slot(box_width - 1)
+
+        for line_idx in range(3):
+            console.print(
+                f"{prefix}{left_btn[line_idx]}  "
+                f"{opt_box[line_idx]}{BOX_V}  "
+                f"{right_btn[line_idx]}"
+            )
+
+    # === Empty row for spacing ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_V}{' ' * inner_width}{BOX_V}")
+
+    # === Main box bottom border ===
+    console.print(f"{prefix}{btn_spacer}  {BOX_BL}{BOX_H * (box_width - 2)}{BOX_BR}")
+
+    # === Navigation buttons ===
+    back_btn = _render_small_box("b", 8, highlight=True)
+    home_btn = _render_small_box("h", 8, highlight=True)
+
+    box_start = btn_width + 2
+    box_center = box_start + box_width // 2
+    nav_btn_width = NAV_BTN_WIDTH
+    btn_gap = NAV_BTN_GAP
+    nav_start = box_center - nav_btn_width - btn_gap // 2
+
+    for line_idx in range(3):
+        console.print(
+            f"{prefix}{' ' * nav_start}{back_btn[line_idx]}{' ' * btn_gap}{home_btn[line_idx]}"
+        )
+
+    # === Scroll indicator and live status ===
+    if total_sensors > VISIBLE_OPTIONS:
+        indicator = f"[dim]({scroll_offset + 1}-{min(scroll_offset + VISIBLE_OPTIONS, total_sensors)} of {total_sensors})[/dim]"
+    else:
+        indicator = ""
+    live_status = "[green]● LIVE[/green]"
+    combined = f"{indicator}  {live_status}" if indicator else live_status
+    indicator_padding = " " * ((total_width - len(_strip_rich_markup(combined))) // 2)
+    console.print(f"{prefix}{indicator_padding}{combined}")
+
+    console.print()
+    console.print(f"{prefix}  [dim]Press b=back, h=home, u/d=scroll[/dim]")
+
+
+class LiveSensorView:
+    """Async context manager for live sensor display with real-time updates."""
+
+    def __init__(
+        self,
+        title: str,
+        sensors: list[Any],
+        get_display_name: Any,
+        format_state: Any,
+    ) -> None:
+        """Initialize live sensor view.
+
+        Args:
+            title: Display title.
+            sensors: List of sensor entities.
+            get_display_name: Callable to get sensor display name.
+            format_state: Callable to format sensor state value.
+        """
+        self.title = title
+        self.sensors = sensors
+        self.get_display_name = get_display_name
+        self.format_state = format_state
+        self._scroll_offset = 0
+        self._running = False
+        self._render_task: asyncio.Task | None = None
+        self._input_task: asyncio.Task | None = None
+        self._unsubscribe_handlers: list[Any] = []
+        self._result: int = MENU_BACK
+        self._needs_render = True
+
+    def _get_sensor_data(self) -> list[tuple[str, str]]:
+        """Get current sensor names and values."""
+        data = []
+        for sensor in self.sensors:
+            name = self.get_display_name(sensor)
+            value = self.format_state(sensor)
+            data.append((name, value))
+        return data
+
+    def _on_state_changed(self, event: Any) -> None:
+        """Handle sensor state change event."""
+        self._needs_render = True
+
+    async def _render_loop(self) -> None:
+        """Render loop that updates display when needed."""
+        while self._running:
+            if self._needs_render:
+                self._needs_render = False
+                sensor_data = self._get_sensor_data()
+                _render_live_sensor_box(self.title, sensor_data, self._scroll_offset)
+            await asyncio.sleep(0.1)
+
+    async def _input_loop(self) -> None:
+        """Handle keyboard input in a non-blocking way."""
+        import select
+        import sys
+
+        while self._running:
+            # Check if input is available (Unix-only, but works on macOS/Linux)
+            if sys.platform != "win32":
+                readable, _, _ = select.select([sys.stdin], [], [], 0.1)
+                if readable:
+                    try:
+                        response = sys.stdin.readline().strip().lower()
+                        await self._handle_input(response)
+                    except (KeyboardInterrupt, EOFError):
+                        self._result = MENU_CANCEL
+                        self._running = False
+            else:
+                # Windows fallback - use blocking input in executor
+                loop = asyncio.get_event_loop()
+                try:
+                    response = await asyncio.wait_for(
+                        loop.run_in_executor(None, input),
+                        timeout=0.5,
+                    )
+                    await self._handle_input(response.strip().lower())
+                except asyncio.TimeoutError:
+                    pass
+                except (KeyboardInterrupt, EOFError):
+                    self._result = MENU_CANCEL
+                    self._running = False
+
+    async def _handle_input(self, response: str) -> None:
+        """Process user input."""
+        total_sensors = len(self.sensors)
+
+        if response == "b":
+            self._result = MENU_BACK
+            self._running = False
+        elif response == "h":
+            self._result = MENU_HOME
+            self._running = False
+        elif response == "u":
+            if self._scroll_offset > 0:
+                self._scroll_offset = max(0, self._scroll_offset - VISIBLE_OPTIONS)
+                self._needs_render = True
+        elif response == "d":
+            if self._scroll_offset + VISIBLE_OPTIONS < total_sensors:
+                max_offset = total_sensors - 1
+                self._scroll_offset = min(
+                    max_offset, self._scroll_offset + VISIBLE_OPTIONS
+                )
+                self._needs_render = True
+
+    async def run(self) -> int:
+        """Run the live sensor view.
+
+        Returns:
+            MENU_BACK, MENU_HOME, or MENU_CANCEL.
+        """
+        # Subscribe to state changes on all sensors
+        try:
+            from zha.const import STATE_CHANGED
+        except ImportError:
+            STATE_CHANGED = "state_changed"
+
+        for sensor in self.sensors:
+            if hasattr(sensor, "on_event"):
+                unsub = sensor.on_event(STATE_CHANGED, self._on_state_changed)
+                self._unsubscribe_handlers.append(unsub)
+
+        self._running = True
+        self._needs_render = True
+
+        # Start render and input tasks
+        self._render_task = asyncio.create_task(self._render_loop())
+        self._input_task = asyncio.create_task(self._input_loop())
+
+        try:
+            # Wait for either task to complete (input loop exits on user action)
+            await asyncio.gather(self._render_task, self._input_task)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._running = False
+
+            # Cancel tasks
+            if self._render_task and not self._render_task.done():
+                self._render_task.cancel()
+                try:
+                    await self._render_task
+                except asyncio.CancelledError:
+                    pass
+
+            if self._input_task and not self._input_task.done():
+                self._input_task.cancel()
+                try:
+                    await self._input_task
+                except asyncio.CancelledError:
+                    pass
+
+            # Unsubscribe from events
+            for unsub in self._unsubscribe_handlers:
+                try:
+                    unsub()
+                except Exception:
+                    pass
+
+        return self._result
+
+
+def live_sensor_view(
+    title: str,
+    sensors: list[Any],
+    get_display_name: Any,
+    format_state: Any,
+) -> LiveSensorView:
+    """Create a live sensor view.
+
+    Args:
+        title: Display title.
+        sensors: List of sensor entities.
+        get_display_name: Callable(entity) -> str for sensor name.
+        format_state: Callable(entity) -> str for sensor value.
+
+    Returns:
+        LiveSensorView instance to run.
+    """
+    return LiveSensorView(title, sensors, get_display_name, format_state)
