@@ -62,6 +62,46 @@ class NetworkManager:
         db_name = f"zigbee_{port_name}_{port_hash}.db"
         return self._data_dir / db_name
 
+    def _get_coordinator_names_path(self) -> Path:
+        """Get the path to the coordinator names file."""
+        return self._data_dir / "coordinator_names.json"
+
+    def _load_coordinator_names(self) -> dict[str, str]:
+        """Load coordinator names from file."""
+        names_path = self._get_coordinator_names_path()
+        if not names_path.exists():
+            return {}
+        try:
+            return json.loads(names_path.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            _LOGGER.warning("Failed to load coordinator names: %s", exc)
+            return {}
+
+    def _save_coordinator_names(self, names: dict[str, str]) -> None:
+        """Save coordinator names to file."""
+        names_path = self._get_coordinator_names_path()
+        try:
+            names_path.write_text(json.dumps(names, indent=2))
+        except OSError as exc:
+            _LOGGER.warning("Failed to save coordinator names: %s", exc)
+
+    def get_coordinator_name(self, port: str) -> str | None:
+        """Get the custom name for a coordinator by port."""
+        names = self._load_coordinator_names()
+        return names.get(port)
+
+    def set_coordinator_name(self, port: str, name: str) -> None:
+        """Set a custom name for a coordinator."""
+        names = self._load_coordinator_names()
+        names[port] = name
+        self._save_coordinator_names(names)
+        _LOGGER.info("Set coordinator name for %s: %s", port, name)
+
+    def has_coordinator_name(self, port: str) -> bool:
+        """Check if a coordinator has a custom name."""
+        names = self._load_coordinator_names()
+        return port in names
+
     def _get_names_path(self, coordinator: DetectedCoordinator) -> Path:
         """Get the device names file path for a coordinator."""
         db_path = self.get_database_path(coordinator)

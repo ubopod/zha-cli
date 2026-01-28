@@ -142,6 +142,11 @@ class ZHACli:
 
         self._detected_coordinators = detected
 
+        # Prompt to name any new coordinators that don't have names yet
+        for coord in detected:
+            if not self._network_manager.has_coordinator_name(coord.port):
+                await self._prompt_coordinator_name(coord)
+
     async def _select_coordinator_menu(self) -> str:
         """Display coordinator selection menu.
 
@@ -153,7 +158,7 @@ class ZHACli:
         # Check which coordinator is currently connected (if any)
         current_coord = self._network_manager.coordinator
 
-        # Build options with network status indicators
+        # Build options with network status indicators and names
         options = []
         for coord in self._detected_coordinators:
             is_connected = (
@@ -167,7 +172,10 @@ class ZHACli:
                 status = "saved"
             else:
                 status = "new"
-            options.append(ui.format_coordinator_option(coord.port, status))
+
+            # Get custom name if available
+            name = self._network_manager.get_coordinator_name(coord.port)
+            options.append(ui.format_coordinator_option(coord.port, status, name))
 
         retry_idx = len(options)
         options.append("Retry detection")
@@ -183,11 +191,18 @@ class ZHACli:
         elif 1 <= choice <= len(self._detected_coordinators):
             selected = self._detected_coordinators[choice - 1]
 
-            # Start network if not already running on this coordinator
-            if current_coord is None or selected.port != current_coord.port:
-                await self._ensure_network_started(selected)
+            # Show coordinator submenu
+            result = await self._coordinator_submenu(selected)
+            if result == "connect":
+                # Start network if not already running on this coordinator
+                if current_coord is None or selected.port != current_coord.port:
+                    await self._ensure_network_started(selected)
+                return "selected"
+            elif result == "renamed":
+                return "settings"  # Refresh menu to show new name
+            else:
+                return "settings"  # Back pressed, stay in coordinator menu
 
-            return "selected"
         elif choice == retry_idx + 1:
             return "retry"
         elif choice == settings_idx + 1:
@@ -195,6 +210,42 @@ class ZHACli:
             return "settings"
         else:
             return "retry"
+
+    async def _coordinator_submenu(self, coordinator: DetectedCoordinator) -> str:
+        """Display submenu for a selected coordinator.
+
+        Returns:
+            "connect" if user wants to connect
+            "renamed" if coordinator was renamed
+            "back" if user pressed back
+        """
+        name = self._network_manager.get_coordinator_name(coordinator.port)
+        display_name = name or coordinator.port
+
+        options = ["Connect", "Rename"]
+        title = f"◆ {display_name}"
+        choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
+
+        if choice in (0, MENU_HOME):
+            self._running = False
+            return "back"
+        elif choice == MENU_BACK:
+            return "back"
+        elif choice == 1:
+            return "connect"
+        elif choice == 2:
+            # Rename coordinator
+            current_name = name or f"{coordinator.radio_type.pretty_name} Coordinator"
+            new_name = ui.prompt_coordinator_name(
+                title="◆ Rename Coordinator",
+                port=coordinator.port,
+                radio_type=coordinator.radio_type.pretty_name,
+                default=current_name,
+            )
+            if new_name:
+                self._network_manager.set_coordinator_name(coordinator.port, new_name)
+            return "renamed"
+        return "back"
 
     async def _settings_menu(self) -> None:
         """Display settings menu."""
@@ -426,6 +477,21 @@ class ZHACli:
 
         if name:
             self._network_manager.set_device_name(ieee, name)
+
+    async def _prompt_coordinator_name(self, coordinator: DetectedCoordinator) -> None:
+        """Prompt the user to name a newly detected coordinator."""
+        # Suggest a default name based on radio type
+        default_name = f"{coordinator.radio_type.pretty_name} Coordinator"
+
+        name = ui.prompt_coordinator_name(
+            title="◆ Name Coordinator",
+            port=coordinator.port,
+            radio_type=coordinator.radio_type.pretty_name,
+            default=default_name,
+        )
+
+        if name:
+            self._network_manager.set_coordinator_name(coordinator.port, name)
 
     async def _wait_for_entities(
         self, ieee: str, name: str, max_wait: float = 10.0

@@ -595,19 +595,24 @@ def _format_entity_state(entity: dict[str, Any]) -> str:
     return "[dim]Unknown[/dim]"
 
 
-def format_coordinator_option(port: str, status: str) -> str:
+def format_coordinator_option(port: str, status: str, name: str | None = None) -> str:
     """Format coordinator for menu display.
 
     Args:
         port: The serial port path.
         status: "connected", "saved", or "new".
+        name: Optional custom name for the coordinator.
     """
+    # Use custom name if available, otherwise show port
+    display = name if name else port
+    port_suffix = f" ({port})" if name else ""
+
     if status == "connected":
-        return f"[green]●[/green] {port} (connected)"
+        return f"[green]●[/green] {display}{port_suffix} (connected)"
     elif status == "saved":
-        return f"[yellow]●[/yellow] {port} (saved network)"
+        return f"[yellow]●[/yellow] {display}{port_suffix} (saved)"
     else:
-        return f"[dim]○[/dim] {port} (new)"
+        return f"[dim]○[/dim] {display}{port_suffix} (new)"
 
 
 def format_device_option(name: str, available: bool) -> str:
@@ -794,6 +799,40 @@ def prompt_device_name(
         info_lines.append(f"Manufacturer: {manufacturer}")
     if model:
         info_lines.append(f"Model: {model}")
+    if default:
+        info_lines.append(f"Default: {default}")
+
+    _render_text_dialog(title, info_lines)
+    console.print()
+
+    try:
+        console.print("  [dim]Enter name (or press Enter for default):[/dim] ", end="")
+        response = input().strip()
+        if response:
+            return response
+        return default
+    except (KeyboardInterrupt, EOFError):
+        return default
+
+
+def prompt_coordinator_name(
+    title: str, port: str, radio_type: str, default: str | None = None
+) -> str | None:
+    """Prompt for a coordinator name using the standard menu layout.
+
+    Args:
+        title: The title for the dialog.
+        port: The serial port path.
+        radio_type: The radio type (e.g., "ezsp", "znp").
+        default: Default name suggestion.
+
+    Returns:
+        The entered name, or None if cancelled.
+    """
+    # Build info lines for display
+    info_lines: list[str] = []
+    info_lines.append(f"Port: {port}")
+    info_lines.append(f"Type: {radio_type}")
     if default:
         info_lines.append(f"Default: {default}")
 
