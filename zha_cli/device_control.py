@@ -106,22 +106,32 @@ class DeviceController:
                 unit = state.get("native_unit_of_measurement", "")
                 if value is not None:
                     return f"{value} {unit}".strip()
-                return "Unknown"
+                return "—"
             # Check for state key
             if "state" in state:
-                return str(state["state"])
-            return "Unknown"
+                value = state["state"]
+                if value is not None:
+                    return str(value)
+                return "—"
+            return "—"
 
         # Device tracker
         if platform == Platform.DEVICE_TRACKER:
-            return state.get("connected", "Unknown")
+            connected = state.get("connected")
+            if connected is not None:
+                return str(connected)
+            return "—"
 
         # Event - show last event type
         if platform == Platform.EVENT:
-            event_type = state.get("event_type", "None")
-            return f"Last: {event_type}"
+            event_type = state.get("event_type")
+            if event_type is not None:
+                return f"Last: {event_type}"
+            return "No events"
 
-        # Fallback - show raw state
+        # Fallback - show dash for empty/None states
+        if not state:
+            return "—"
         return str(state)
 
     @staticmethod
