@@ -111,7 +111,7 @@ class ZHACli:
 
     async def _auto_restore_network(self, coordinator: DetectedCoordinator) -> None:
         """Auto-restore a network without selecting it for UI navigation."""
-        async with ui.spinner(f"◆ {coordinator.radio_type.pretty_name}"):
+        async with ui.spinner("◆ Zigbee"):
             try:
                 gateway = await self._network_manager.start_network(coordinator)
                 self._pairing_manager = DevicePairingManager(gateway)
@@ -268,12 +268,9 @@ class ZHACli:
             action = "Restoring"
         else:
             action = "Starting"
-        spinner_msg = f"◆ {coordinator.radio_type.pretty_name}"
+        spinner_msg = "◆ Zigbee"
 
-        ui.print_info(
-            f"{action} network with {coordinator.radio_type.pretty_name} "
-            f"at {coordinator.port}..."
-        )
+        ui.print_info(f"{action} Zigbee network at {coordinator.port}...")
 
         async with ui.spinner(spinner_msg):
             try:
