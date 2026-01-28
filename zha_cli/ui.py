@@ -92,10 +92,14 @@ def _render_small_box(text: str, width: int = 5, highlight: bool = True) -> list
 
 
 def _render_option_box(text: str, width: int, highlighted: bool = False) -> list[str]:
-    """Render an option inside a rounded box."""
-    inner_width = width - 6
-    # Use _fit_text to handle Rich markup correctly
-    display_text = _fit_text(text, inner_width)
+    """Render an option box flush left with more right padding."""
+    # Box is flush left (no left padding), with 4 spaces right padding
+    right_padding = 4
+    box_width = width - right_padding  # total box width including borders
+    horiz_width = box_width - 2  # horizontal line width (minus corners)
+    text_width = horiz_width - 2  # text area (minus spaces around text)
+
+    display_text = _fit_text(text, text_width)
 
     if highlighted:
         start = "[bold cyan]"
@@ -104,21 +108,21 @@ def _render_option_box(text: str, width: int, highlighted: bool = False) -> list
         start = ""
         end = ""
 
+    # Box flush left, padded right
     return [
-        f"  {start}{BOX_TL}{BOX_H * (width - 4)}{BOX_TR}{end}  ",
-        f"  {start}{BOX_V} {display_text} {BOX_V}{end}  ",
-        f"  {start}{BOX_BL}{BOX_H * (width - 4)}{BOX_BR}{end}  ",
+        f"{start}{BOX_TL}{BOX_H * horiz_width}{BOX_TR}{end}{' ' * right_padding}",
+        f"{start}{BOX_V} {display_text} {BOX_V}{end}{' ' * right_padding}",
+        f"{start}{BOX_BL}{BOX_H * horiz_width}{BOX_BR}{end}{' ' * right_padding}",
     ]
 
 
 def _render_empty_option_slot(width: int) -> list[str]:
     """Render empty space for an option slot."""
-    # Match the visual width of _render_option_box (width + 2 for padding alignment)
-    slot_width = width + 2
+    # Match the visual width of _render_option_box (same as width parameter)
     return [
-        " " * slot_width,
-        " " * slot_width,
-        " " * slot_width,
+        " " * width,
+        " " * width,
+        " " * width,
     ]
 
 
@@ -175,14 +179,14 @@ def _render_menu_box(
 
     # === Option rows with side controls ===
     for i, opt in enumerate(visible_opts):
-        # Prepare the option box (3 lines)
+        # Prepare the option box (3 lines) - width matches main box interior
         if opt is not None:
             opt_box = _render_option_box(
-                f"{scroll_offset + i + 1}. {opt}", box_width - 4
+                f"{scroll_offset + i + 1}. {opt}", box_width - 2
             )
             left_btn = _render_small_box(str(i + 1), btn_width, highlight=True)
         else:
-            opt_box = _render_empty_option_slot(box_width - 4)
+            opt_box = _render_empty_option_slot(box_width - 2)
             left_btn = [" " * btn_width] * 3
 
         # Right side buttons (u for first row, d for third row)
@@ -345,13 +349,16 @@ def _render_loading_box(message: str, spinner_char: str, box_width: int = 54) ->
 
         # Content for middle slot (spinner), empty for others
         if i == 1:
-            # Spinner in center slot - match option box width (box_width - 4 + 2 = box_width - 2)
-            slot_width = box_width - 2
-            spinner_text = spinner_char.center(slot_width - 2)
+            # Spinner box flush left with right padding (matching option box layout)
+            slot_width = box_width - 4  # matches option box width parameter
+            right_padding = 4
+            inner_box_width = slot_width - right_padding
+            horiz_width = inner_box_width - 2
+            spinner_text = spinner_char.center(horiz_width)
             opt_lines = [
-                " " * slot_width,
-                f" [bold yellow]{spinner_text}[/bold yellow] ",
-                " " * slot_width,
+                f"[dim]{BOX_TL}{BOX_H * horiz_width}{BOX_TR}[/dim]{' ' * right_padding}",
+                f"[dim]{BOX_V}[/dim][bold yellow]{spinner_text}[/bold yellow][dim]{BOX_V}[/dim]{' ' * right_padding}",
+                f"[dim]{BOX_BL}{BOX_H * horiz_width}{BOX_BR}[/dim]{' ' * right_padding}",
             ]
         else:
             opt_lines = _render_empty_option_slot(box_width - 4)
