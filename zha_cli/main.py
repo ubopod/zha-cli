@@ -126,13 +126,30 @@ class ZHACli:
         ui.print_info(f"Found {len(devices)} paired device(s)")
 
     async def _detect_coordinators_with_spinner(self) -> None:
-        """Detect coordinators with a loading spinner."""
+        """Detect coordinators with a loading spinner.
+
+        Preserves the currently connected coordinator since its port
+        cannot be probed while the network is running.
+        """
+        # Remember the currently connected coordinator (its port is locked)
+        current_coord = self._network_manager.coordinator
+
         async with ui.spinner("◆ Zigbee"):
             try:
-                self._detected_coordinators = await discover_coordinators()
+                detected = await discover_coordinators()
             except Exception as exc:
                 ui.print_error(f"Error detecting coordinators: {exc}")
-                self._detected_coordinators = []
+                detected = []
+
+        # If we have a connected coordinator, ensure it's in the list
+        if current_coord is not None and self._network_manager.is_running:
+            # Check if the current coordinator was detected
+            current_in_list = any(c.port == current_coord.port for c in detected)
+            if not current_in_list:
+                # Prepend the connected coordinator so it appears first
+                detected.insert(0, current_coord)
+
+        self._detected_coordinators = detected
 
     async def _select_coordinator_menu(self) -> str:
         """Display coordinator selection menu.
