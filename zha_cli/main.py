@@ -352,6 +352,8 @@ class ZHACli:
         # Add action options
         pair_idx = len(options)
         options.append("Pair new device")
+        rename_idx = len(options)
+        options.append("Rename device")
         reset_idx = len(options)
         options.append("Reset network")
 
@@ -368,6 +370,8 @@ class ZHACli:
             await self._control_device_direct(devices[choice - 1])
         elif choice == pair_idx + 1:
             await self._pair_device()
+        elif choice == rename_idx + 1:
+            await self._rename_device_menu()
         elif choice == reset_idx + 1:
             await self._reset_network()
 
@@ -388,6 +392,46 @@ class ZHACli:
             self._pairing_manager = None
             spin.set_status("Network reset complete")
             await asyncio.sleep(0.5)
+
+    async def _rename_device_menu(self) -> None:
+        """Show device picker for renaming."""
+        devices = self._network_manager.get_devices()
+        if not devices:
+            ui.show_message("Info", "No devices to rename")
+            return
+
+        # Build device list
+        options: list[str] = []
+        for device in devices:
+            name = device["name"] or device["model"] or str(device["ieee"])
+            options.append(ui.format_device_option(name, device["available"]))
+
+        choice = ui.prompt_menu(
+            "◆ Rename Device", options, show_back=True, show_home=True
+        )
+
+        if choice in (0, MENU_BACK):
+            return
+        if choice == MENU_HOME:
+            self._running = False
+            return
+
+        # Get selected device
+        device_info = devices[choice - 1]
+        ieee = device_info["ieee"]
+        current_name = device_info["name"] or device_info["model"] or str(ieee)
+        manufacturer = device_info.get("manufacturer")
+        model = device_info.get("model")
+
+        # Prompt for new name
+        new_name = ui.prompt_device_name(
+            title="◆ Rename Device",
+            manufacturer=manufacturer,
+            model=model,
+            default=current_name,
+        )
+        if new_name and new_name != current_name:
+            self._network_manager.set_device_name(ieee, new_name)
 
     async def _pair_device(self) -> None:
         """Enable pairing mode to add new devices."""
@@ -637,10 +681,6 @@ class ZHACli:
                 sensors_idx = len(options)
                 options.append(f"View sensors ({len(sensors)})")
 
-            # Add rename option at the end
-            rename_idx = len(options)
-            options.append("Rename device")
-
             choice = ui.prompt_menu(
                 f"◆ {name}", options, show_back=True, show_home=True
             )
@@ -650,19 +690,6 @@ class ZHACli:
             if choice == MENU_HOME:
                 self._running = False
                 return
-
-            if choice == rename_idx + 1:
-                # Rename device
-                new_name = ui.prompt_device_name(
-                    title="◆ Rename Device",
-                    manufacturer=manufacturer,
-                    model=model,
-                    default=name,
-                )
-                if new_name and new_name != name:
-                    self._network_manager.set_device_name(ieee, new_name)
-                    name = new_name
-                continue
 
             if sensors_idx >= 0 and choice == sensors_idx + 1:
                 # View sensors
