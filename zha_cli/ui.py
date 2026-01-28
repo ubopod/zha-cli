@@ -1170,10 +1170,21 @@ class LiveSensorView:
             # Access the cluster handler via the sensor's internal reference
             if hasattr(sensor, "_cluster_handler"):
                 cluster_handler = sensor._cluster_handler
+                # Log detailed info about the cluster handler
+                cluster_name = getattr(
+                    getattr(cluster_handler, "cluster", None), "name", "unknown"
+                )
+                listener_count = len(
+                    getattr(cluster_handler, "_listeners", {}).get(
+                        CLUSTER_HANDLER_ATTRIBUTE_UPDATED, []
+                    )
+                )
                 _LOGGER.debug(
-                    "  Cluster handler type: %s, id: %s",
+                    "  Cluster handler: %s (cluster=%s, id=%s, existing_listeners=%d)",
                     type(cluster_handler).__name__,
+                    cluster_name,
                     getattr(cluster_handler, "unique_id", "unknown"),
+                    listener_count,
                 )
                 if hasattr(cluster_handler, "on_event"):
                     unsub = cluster_handler.on_event(
