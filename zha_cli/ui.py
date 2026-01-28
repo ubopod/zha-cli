@@ -11,6 +11,9 @@ from rich.console import Console
 
 console = Console()
 
+# Track whether screen has been initialized (first render needs full clear)
+_screen_initialized = False
+
 # Menu navigation constants
 MENU_BACK = -1
 MENU_HOME = -2
@@ -39,6 +42,26 @@ NAV_BTN_GAP = 4
 def clear_screen() -> None:
     """Clear the terminal screen."""
     os.system("cls" if os.name == "nt" else "clear")
+
+
+def _move_cursor_home() -> None:
+    """Move cursor to top-left without clearing screen."""
+    print("\033[H", end="", flush=True)
+
+
+def _ensure_screen_ready() -> None:
+    """Clear screen on first render, reposition cursor after.
+
+    This provides smooth transitions between screens by only clearing
+    the screen once at startup, then using cursor repositioning for
+    subsequent renders.
+    """
+    global _screen_initialized
+    if not _screen_initialized:
+        clear_screen()
+        _screen_initialized = True
+    else:
+        _move_cursor_home()
 
 
 def _strip_rich_markup(text: str) -> str:
@@ -117,7 +140,7 @@ def _render_text_dialog(
     left_margin = max(0, (term_width - total_width) // 2)
     top_margin = max(0, (term_height - 20) // 2)
 
-    clear_screen()
+    _ensure_screen_ready()
     prefix = " " * left_margin
     btn_spacer = " " * btn_width
     inner_width = box_width - 2
@@ -251,7 +274,7 @@ def _render_menu_box(
     box_width: int = BOX_WIDTH,
 ) -> None:
     """Render the menu box with controls."""
-    clear_screen()
+    _ensure_screen_ready()
 
     term_width, term_height = _get_terminal_size()
 
@@ -420,7 +443,7 @@ def _render_loading_box(
     box_width: int = BOX_WIDTH,
 ) -> None:
     """Render a loading box matching menu dimensions with placeholder buttons."""
-    clear_screen()
+    _ensure_screen_ready()
 
     term_width, term_height = _get_terminal_size()
 
@@ -650,7 +673,7 @@ def prompt_confirm(message: str, default: bool = True, title: str = "Confirm") -
     left_margin = max(0, (term_width - total_width) // 2)
     top_margin = max(0, (term_height - 20) // 2)
 
-    clear_screen()
+    _ensure_screen_ready()
     prefix = " " * left_margin
     btn_spacer = " " * btn_width
     inner_width = box_width - 2
