@@ -163,8 +163,11 @@ class DeviceController:
         if platform == Platform.SENSOR:
             value = getattr(entity, "native_value", None)
             if value is not None:
-                unit = getattr(entity, "native_unit_of_measurement", "") or ""
-                return f"{value} {unit}".strip()
+                raw_unit = getattr(entity, "native_unit_of_measurement", None)
+                unit = _format_unit(raw_unit)
+                if unit:
+                    return f"{value} {unit}"
+                return str(value)
             return "Waiting..."
 
         # Device tracker
