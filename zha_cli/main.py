@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import contextlib
 import logging
+import os
 import signal
 import sys
 from typing import Any
@@ -906,8 +907,8 @@ class ZHACli:
                         await DeviceController.refresh_entity(sensor)
 
 
-class ImmediateStreamHandler(logging.StreamHandler):
-    """Stream handler that flushes immediately after each log."""
+class ImmediateFileHandler(logging.FileHandler):
+    """File handler that flushes immediately after each log."""
 
     def emit(self, record: logging.LogRecord) -> None:
         """Emit a record and flush immediately."""
@@ -924,8 +925,9 @@ def setup_logging(verbose: bool = False) -> None:
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
-    # Set up bare bones text logging with immediate flush
-    handler = ImmediateStreamHandler(sys.stderr)
+    # Set up bare bones text logging to file with immediate flush
+    log_file = os.path.join(os.getcwd(), "zha-cli-debug")
+    handler = ImmediateFileHandler(log_file, mode="w")
     handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
     root.addHandler(handler)
     root.setLevel(level)
