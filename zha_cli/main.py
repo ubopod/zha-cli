@@ -906,15 +906,29 @@ class ZHACli:
                         await DeviceController.refresh_entity(sensor)
 
 
+class ImmediateStreamHandler(logging.StreamHandler):
+    """Stream handler that flushes immediately after each log."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Emit a record and flush immediately."""
+        super().emit(record)
+        self.flush()
+
+
 def setup_logging(verbose: bool = False) -> None:
     """Configure logging for the CLI."""
     level = logging.DEBUG if verbose else logging.WARNING
 
-    # Set up basic logging
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    # Remove any existing handlers
+    root = logging.getLogger()
+    for handler in root.handlers[:]:
+        root.removeHandler(handler)
+
+    # Set up bare bones text logging with immediate flush
+    handler = ImmediateStreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    root.addHandler(handler)
+    root.setLevel(level)
 
     # Reduce noise from libraries
     logging.getLogger("zigpy").setLevel(logging.WARNING)

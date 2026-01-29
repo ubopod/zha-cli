@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import select
@@ -10,6 +11,12 @@ import sys
 from typing import Any, Callable
 
 from rich.console import Console
+
+_LOGGER = logging.getLogger(__name__)
+
+# ANSI codes for bold text (used for sensor event debug logs)
+BOLD = "\033[1m"
+RESET = "\033[0m"
 
 console = Console()
 
@@ -609,6 +616,7 @@ class LiveSensorMenu:
 
     def _on_state_changed(self, event: Any) -> None:
         """Event callback - triggers immediate redraw."""
+        _LOGGER.debug("%sSENSOR EVENT: state_changed received%s", BOLD, RESET)
         self._needs_render = True
 
     def _build_options(self) -> list[str]:
@@ -683,6 +691,13 @@ class LiveSensorMenu:
 
         for sensor in self.sensors:
             if hasattr(sensor, "on_event"):
+                _LOGGER.debug(
+                    "%sSENSOR EVENT: subscribing to %s on %s%s",
+                    BOLD,
+                    STATE_CHANGED,
+                    getattr(sensor, "unique_id", sensor),
+                    RESET,
+                )
                 unsub = sensor.on_event(STATE_CHANGED, self._on_state_changed)
                 self._unsubscribers.append(unsub)
 
@@ -703,6 +718,7 @@ class LiveSensorMenu:
                 pass
             # Unsubscribe from all events
             for unsub in self._unsubscribers:
+                _LOGGER.debug("%sSENSOR EVENT: unsubscribing listener%s", BOLD, RESET)
                 unsub()
 
         return self._result
