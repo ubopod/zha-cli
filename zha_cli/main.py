@@ -11,6 +11,8 @@ import signal
 import sys
 from typing import TYPE_CHECKING, Any
 
+import serial.tools.list_ports
+
 if TYPE_CHECKING:
     from zha.application.platforms import PlatformEntity
 
@@ -157,12 +159,17 @@ class ZHACli:
             ui.show_message("Error", f"Detection failed: {error_msg}")
 
         # If we have a connected coordinator, ensure it's in the list
+        # (its port can't be probed while the network is running)
         if current_coord is not None and self._network_manager.is_running:
-            # Check if the current coordinator was detected
             current_in_list = any(c.port == current_coord.port for c in detected)
             if not current_in_list:
-                # Prepend the connected coordinator so it appears first
-                detected.insert(0, current_coord)
+                # Verify the port still exists before re-adding
+                port_exists = any(
+                    p.device == current_coord.port
+                    for p in serial.tools.list_ports.comports()
+                )
+                if port_exists:
+                    detected.insert(0, current_coord)
 
         self._detected_coordinators = detected
 
@@ -221,7 +228,14 @@ class ZHACli:
             selected = self._detected_coordinators[choice - 1]
             # Connect directly when coordinator is selected
             if current_coord is None or selected.port != current_coord.port:
-                await self._ensure_network_started(selected)
+                if not await self._ensure_network_started(selected):
+                    # Connection failed - remove from list and stay in menu
+                    self._detected_coordinators.remove(selected)
+                    ui.show_message(
+                        "Connection Failed",
+                        "Coordinator not available. Press back to continue.",
+                    )
+                    return "retry"
             return "selected"
         elif choice == retry_idx + 1:
             return "retry"
