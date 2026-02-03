@@ -33,6 +33,7 @@ class NetworkManager:
         self._coordinator: DetectedCoordinator | None = None
         self._data_dir = data_dir or DEFAULT_DATA_DIR
         self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._device_names_cache: dict[str, str] | None = None
 
     @property
     def gateway(self) -> Gateway | None:
@@ -108,17 +109,26 @@ class NetworkManager:
         return db_path.with_suffix(".names.json")
 
     def _load_device_names(self) -> dict[str, str]:
-        """Load device names from the current coordinator's names file."""
+        """Load device names from cache or disk.
+
+        Uses in-memory cache to avoid repeated disk I/O.
+        """
+        if self._device_names_cache is not None:
+            return self._device_names_cache
+
         if self._coordinator is None:
             return {}
         names_path = self._get_names_path(self._coordinator)
         if not names_path.exists():
-            return {}
+            self._device_names_cache = {}
+            return self._device_names_cache
         try:
-            return json.loads(names_path.read_text())
+            self._device_names_cache = json.loads(names_path.read_text())
+            return self._device_names_cache
         except (json.JSONDecodeError, OSError) as exc:
             _LOGGER.warning("Failed to load device names: %s", exc)
-            return {}
+            self._device_names_cache = {}
+            return self._device_names_cache
 
     def _save_device_names(self, names: dict[str, str]) -> None:
         """Save device names to the current coordinator's names file."""
@@ -134,6 +144,7 @@ class NetworkManager:
         """Set a custom name for a device."""
         names = self._load_device_names()
         names[str(ieee)] = name
+        self._device_names_cache = names  # Update cache
         self._save_device_names(names)
         _LOGGER.info("Set device name for %s: %s", ieee, name)
 
@@ -199,6 +210,7 @@ class NetworkManager:
         await self._gateway.async_initialize()
 
         self._coordinator = coordinator
+        self._device_names_cache = None  # Invalidate cache on coordinator change
 
         _LOGGER.info("Network started successfully")
         return self._gateway

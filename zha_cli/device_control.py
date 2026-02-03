@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -204,11 +205,12 @@ class DeviceController:
         return str(state)
 
     @staticmethod
-    async def refresh_entity(entity: PlatformEntity) -> bool:
+    async def refresh_entity(entity: PlatformEntity, timeout: float = 5.0) -> bool:
         """Refresh entity state from device via ZCL Read Attributes.
 
         Args:
             entity: The entity to refresh.
+            timeout: Maximum seconds to wait for device response.
 
         Returns:
             True if refresh succeeded, False if it failed (e.g., timeout).
@@ -219,11 +221,14 @@ class DeviceController:
 
         if attribute_name and cluster_handler:
             try:
-                await cluster_handler.get_attribute_value(
-                    attribute_name, from_cache=False
+                await asyncio.wait_for(
+                    cluster_handler.get_attribute_value(
+                        attribute_name, from_cache=False
+                    ),
+                    timeout=timeout,
                 )
                 return True
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 _LOGGER.debug(
                     "Timeout reading %s from %s (battery device?)",
                     attribute_name,
@@ -242,7 +247,7 @@ class DeviceController:
         # Fallback for entities without _attribute_name
         if hasattr(entity, "async_update"):
             try:
-                await entity.async_update()
+                await asyncio.wait_for(entity.async_update(), timeout=timeout)
             except Exception:
                 return False
         return True

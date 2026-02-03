@@ -546,7 +546,7 @@ class ZHACli:
                     _LOGGER.exception("Control failed")
 
     async def _wait_for_entities(
-        self, ieee: str, name: str, max_wait: float = 10.0
+        self, ieee: str, name: str, max_wait: float = 5.0
     ) -> list[PlatformEntity] | None:
         """Wait for device entities to be available.
 
@@ -556,7 +556,7 @@ class ZHACli:
         Returns:
             List of controllable entities, or None if device not found/no entities.
         """
-        poll_interval = 1.0
+        poll_interval = 0.2  # Fast polling for quick response
         elapsed = 0.0
 
         # Check once before showing spinner
