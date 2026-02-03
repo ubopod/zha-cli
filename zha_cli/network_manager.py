@@ -249,13 +249,20 @@ class NetworkManager:
         """Delete a database file and its related files."""
         if db_path.exists():
             _LOGGER.info("Deleting network database: %s", db_path)
-            db_path.unlink()
+            try:
+                db_path.unlink()
+            except OSError as exc:
+                _LOGGER.warning("Failed to delete database %s: %s", db_path, exc)
+                return
 
             # Also delete any related files (e.g., -wal, -shm for SQLite)
             for suffix in ["-wal", "-shm", "-journal"]:
                 related = db_path.with_suffix(db_path.suffix + suffix)
                 if related.exists():
-                    related.unlink()
+                    try:
+                        related.unlink()
+                    except OSError as exc:
+                        _LOGGER.warning("Failed to delete %s: %s", related, exc)
 
             _LOGGER.info("Network database deleted")
 
@@ -263,7 +270,10 @@ class NetworkManager:
         names_path = db_path.with_suffix(".names.json")
         if names_path.exists():
             _LOGGER.info("Deleting device names: %s", names_path)
-            names_path.unlink()
+            try:
+                names_path.unlink()
+            except OSError as exc:
+                _LOGGER.warning("Failed to delete device names %s: %s", names_path, exc)
 
     def delete_all_networks(self) -> int:
         """Delete all saved network databases.
@@ -384,8 +394,8 @@ class NetworkManager:
                 self._save_device_names(names)
 
             return True
-        except Exception as exc:
-            _LOGGER.exception("Failed to remove device %s: %s", ieee, exc)
+        except Exception:
+            _LOGGER.exception("Failed to remove device %s", ieee)
             return False
 
     def get_backups(self) -> list[dict]:
@@ -406,7 +416,9 @@ class NetworkManager:
             result.append(
                 {
                     "index": i,
-                    "backup_time": backup.backup_time.strftime("%Y-%m-%d %H:%M"),
+                    "backup_time": backup.backup_time.strftime("%Y-%m-%d %H:%M")
+                    if backup.backup_time
+                    else "Unknown",
                     "device_count": device_count,
                     "is_complete": backup.is_complete(),
                 }
@@ -427,7 +439,9 @@ class NetworkManager:
             len(backup.network_info.nwk_addresses) if backup.network_info else 0
         )
         return {
-            "backup_time": backup.backup_time.strftime("%Y-%m-%d %H:%M"),
+            "backup_time": backup.backup_time.strftime("%Y-%m-%d %H:%M")
+            if backup.backup_time
+            else "Unknown",
             "device_count": device_count,
             "is_complete": backup.is_complete(),
         }
@@ -452,7 +466,7 @@ class NetworkManager:
         backup = backups[index]
         await self._gateway.application_controller.backups.restore_backup(backup)
 
-    async def delete_backup(self, index: int) -> None:
+    def delete_backup(self, index: int) -> None:
         """Delete a backup by index.
 
         Args:

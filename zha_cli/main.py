@@ -9,7 +9,10 @@ import logging
 import os
 import signal
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from zha.application.platforms import PlatformEntity
 
 from zha_cli import ui
 from zha_cli.coordinator_probe import DetectedCoordinator, discover_coordinators
@@ -375,7 +378,7 @@ class ZHACli:
                     return
                 if confirm:
                     try:
-                        await self._network_manager.delete_backup(0)
+                        self._network_manager.delete_backup(0)
                     except Exception as exc:
                         ui.show_message("Error", f"Delete failed: {exc}")
                         _LOGGER.exception("Backup delete failed")
@@ -392,6 +395,10 @@ class ZHACli:
             return
 
         coordinator = self._network_manager.coordinator
+        if coordinator is None:
+            ui.show_message("Error", "No coordinator available")
+            return
+
         async with ui.spinner("◆ Zigbee") as spin:
             await self._network_manager.reset(coordinator)
             self._pairing_manager = None
@@ -539,7 +546,7 @@ class ZHACli:
 
     async def _wait_for_entities(
         self, ieee: str, name: str, max_wait: float = 10.0
-    ) -> list | None:
+    ) -> list[PlatformEntity] | None:
         """Wait for device entities to be available.
 
         Newly paired devices may take time to initialize. This method polls
@@ -721,8 +728,8 @@ class ZHACli:
                                     "model": info.model,
                                 }
                             )
-                    except Exception as exc:
-                        _LOGGER.exception("Error in on_initialized callback: %s", exc)
+                    except Exception:
+                        _LOGGER.exception("Error in on_initialized callback")
 
                 unsubscribe = pairing_manager.subscribe_to_events(
                     on_joined=on_joined,
@@ -893,7 +900,7 @@ class ZHACli:
                 return
             if confirm:
                 try:
-                    await self._network_manager.delete_backup(backup["index"])
+                    self._network_manager.delete_backup(backup["index"])
                 except Exception as exc:
                     ui.show_message("Error", f"Delete failed: {exc}")
                     _LOGGER.exception("Backup delete failed")

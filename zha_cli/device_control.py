@@ -241,7 +241,10 @@ class DeviceController:
 
         # Fallback for entities without _attribute_name
         if hasattr(entity, "async_update"):
-            await entity.async_update()
+            try:
+                await entity.async_update()
+            except Exception:
+                return False
         return True
 
     @staticmethod

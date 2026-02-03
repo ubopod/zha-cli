@@ -50,7 +50,7 @@ NAV_BTN_GAP = 4
 
 def clear_screen() -> None:
     """Clear the terminal screen."""
-    os.system("cls" if os.name == "nt" else "clear")
+    print("\033[2J\033[H", end="", flush=True)
 
 
 def _move_cursor_home() -> None:
@@ -683,7 +683,10 @@ class LiveSensorMenu:
         elif response in ("1", "2", "3"):
             # Selection (refresh is last option)
             idx = self._scroll_offset + int(response) - 1
-            if idx == len(self.sensors):
+            if idx < len(self.sensors):
+                # Sensor selected - currently just triggers re-render
+                pass
+            elif idx == len(self.sensors):
                 # Refresh option selected - handled by caller
                 self._result = len(self.sensors) + 1
                 self._running = False
@@ -720,6 +723,7 @@ class LiveSensorMenu:
             for unsub in self._unsubscribers:
                 _LOGGER.debug("%sSENSOR EVENT: unsubscribing listener%s", BOLD, RESET)
                 unsub()
+            self._unsubscribers.clear()
 
         return self._result
 

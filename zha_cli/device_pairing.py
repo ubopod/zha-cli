@@ -29,7 +29,6 @@ class DevicePairingManager:
         self._gateway = gateway
         self._unsubscribe_joined: Callable[[], None] | None = None
         self._unsubscribe_initialized: Callable[[], None] | None = None
-        self._pairing_active = False
 
     def subscribe_to_events(
         self,
@@ -77,12 +76,10 @@ class DevicePairingManager:
         """
         _LOGGER.info("Enabling pairing mode for %d seconds", duration_s)
         await self._gateway.application_controller.permit(duration_s)
-        self._pairing_active = True
         _LOGGER.info("Pairing mode enabled")
 
     async def disable_pairing(self) -> None:
         """Disable pairing mode."""
         _LOGGER.info("Disabling pairing mode")
         await self._gateway.application_controller.permit(0)
-        self._pairing_active = False
         _LOGGER.info("Pairing mode disabled")
