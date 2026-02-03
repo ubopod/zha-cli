@@ -24,6 +24,10 @@ _LOGGER = logging.getLogger(__name__)
 class ZHACli:
     """ZHA CLI application."""
 
+    # -------------------------------------------------------------------------
+    # Lifecycle
+    # -------------------------------------------------------------------------
+
     def __init__(self) -> None:
         """Initialize the CLI application."""
         self._network_manager = NetworkManager()
@@ -31,25 +35,10 @@ class ZHACli:
         self._detected_coordinators: list[DetectedCoordinator] = []
         self._running = True
 
-    def _get_coordinator_status(self, coord: DetectedCoordinator) -> str:
-        """Get the status of a coordinator.
-
-        Returns:
-            "connected" if currently connected
-            "saved" if has existing network
-            "new" if no network exists
-        """
-        current_coord = self._network_manager.coordinator
-        if current_coord is not None and coord.port == current_coord.port:
-            return "connected"
-        if self._network_manager.has_existing_network(coord):
-            return "saved"
-        return "new"
-
     async def run(self) -> None:
         """Run the main CLI loop."""
         # Set up signal handlers
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, self._signal_handler)
 
@@ -64,68 +53,84 @@ class ZHACli:
         finally:
             await self._cleanup()
 
+    def _signal_handler(self) -> None:
+        """Handle shutdown signals."""
+        self._running = False
+
+    async def _cleanup(self) -> None:
+        """Clean up resources."""
+        await self._network_manager.shutdown()
+        # Clear screen on exit to leave terminal clean
+        ui.clear_screen()
+
+    # -------------------------------------------------------------------------
+    # Coordinator Flow
+    # -------------------------------------------------------------------------
+
     async def _coordinator_entry_flow(self) -> None:
         """Handle coordinator detection and selection on entry."""
         auto_restored = False
-        selection_complete = False
 
-        while self._running and not selection_complete:
-            # Only run detection if we don't already have coordinators
-            # (e.g., skip when navigating back from device menu)
+        while self._running:
+            if not await self._ensure_coordinators_detected():
+                return  # User exited
+
+            # Auto-restore network if exactly one coordinator has existing network
+            if not auto_restored:
+                coords_with_network = [
+                    c
+                    for c in self._detected_coordinators
+                    if self._network_manager.has_existing_network(c)
+                ]
+                if len(coords_with_network) == 1:
+                    coord = coords_with_network[0]
+                    # Skip if already running on this coordinator
+                    current = self._network_manager.coordinator
+                    if not (
+                        current is not None
+                        and current.port == coord.port
+                        and self._network_manager.is_running
+                    ):
+                        await self._ensure_network_started(coord, silent=True)
+                auto_restored = True
+
+            result = await self._select_coordinator_menu()
+            if result == "selected":
+                return
+            elif result == "retry":
+                self._detected_coordinators = []
+            elif result == "exit":
+                return
+            # "settings" continues loop
+
+    async def _ensure_coordinators_detected(self) -> bool:
+        """Ensure coordinators are detected, prompting retry if none found.
+
+        Returns:
+            True if coordinators are available, False if user exits.
+        """
+        while self._running:
+            # Skip detection if we already have coordinators
+            # (e.g., when navigating back from device menu)
             if not self._detected_coordinators:
                 await self._detect_coordinators_with_spinner()
 
-            if not self._detected_coordinators:
-                title = "◆ No Coordinators Found"
-                options = ["Retry detection", "Settings"]
-                choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
-                if choice in (0, MENU_BACK, MENU_HOME):
-                    self._running = False
-                    return
-                elif choice == 2:
-                    await self._settings_menu()
-                # choice == 1 means retry, loop continues
-            else:
-                # Auto-restore network if exactly one coordinator has existing network
-                if not auto_restored:
-                    coords_with_network = [
-                        c
-                        for c in self._detected_coordinators
-                        if self._network_manager.has_existing_network(c)
-                    ]
-                    if len(coords_with_network) == 1:
-                        coord = coords_with_network[0]
-                        # Skip if already running on this coordinator
-                        current = self._network_manager.coordinator
-                        if not (
-                            current is not None
-                            and current.port == coord.port
-                            and self._network_manager.is_running
-                        ):
-                            await self._auto_restore_network(coord)
-                        auto_restored = True
+            if self._detected_coordinators:
+                return True
 
-                result = await self._select_coordinator_menu()
-                if result == "retry":
-                    # Clear coordinators to trigger re-detection
-                    self._detected_coordinators = []
-                    continue
-                elif result == "settings":
-                    continue
-                selection_complete = True
+            # No coordinators found - show retry menu
+            title = "◆ No Coordinators Found"
+            options = ["Retry detection", "Settings"]
+            choice = ui.prompt_menu(title, options, show_back=True, show_home=True)
 
-    async def _auto_restore_network(self, coordinator: DetectedCoordinator) -> None:
-        """Auto-restore a network without selecting it for UI navigation."""
-        async with ui.spinner("◆ Zigbee") as spin:
-            try:
-                gateway = await self._network_manager.start_network(coordinator)
-                self._pairing_manager = DevicePairingManager(gateway)
-                devices = self._network_manager.get_devices()
-                spin.set_status(f"Restored! {len(devices)} device(s)")
-                await asyncio.sleep(0.5)  # Brief pause to show status
-            except Exception as exc:
-                _LOGGER.exception("Network restore failed")
-                ui.show_message("Error", f"Failed to restore network: {exc}")
+            if choice in (0, MENU_BACK, MENU_HOME):
+                self._running = False
+                return False
+            elif choice == 2:
+                await self._settings_menu()
+            # choice == 1 means retry, loop continues
+
+        return False
 
     async def _detect_coordinators_with_spinner(self) -> None:
         """Detect coordinators with a loading spinner.
@@ -162,6 +167,21 @@ class ZHACli:
         for coord in detected:
             if not self._network_manager.has_coordinator_name(coord.port):
                 await self._prompt_coordinator_name(coord)
+
+    def _get_coordinator_status(self, coord: DetectedCoordinator) -> str:
+        """Get the status of a coordinator.
+
+        Returns:
+            "connected" if currently connected
+            "saved" if has existing network
+            "new" if no network exists
+        """
+        current_coord = self._network_manager.coordinator
+        if current_coord is not None and coord.port == current_coord.port:
+            return "connected"
+        if self._network_manager.has_existing_network(coord):
+            return "saved"
+        return "new"
 
     async def _select_coordinator_menu(self) -> str:
         """Display coordinator selection menu.
@@ -211,102 +231,17 @@ class ZHACli:
         else:
             return "retry"
 
-    async def _settings_menu(self) -> None:
-        """Display settings menu."""
-        saved_count = self._network_manager.get_saved_network_count()
-
-        options = [
-            f"Delete all saved networks ({saved_count} saved)",
-        ]
-
-        choice = ui.prompt_menu("◆ Settings", options, show_back=True, show_home=True)
-
-        if choice in (0, MENU_BACK):
-            return
-        elif choice == MENU_HOME:
-            self._running = False
-            return
-        elif choice == 1:
-            await self._delete_all_networks()
-
-    async def _delete_all_networks(self) -> None:
-        """Delete all saved network databases."""
-        saved_count = self._network_manager.get_saved_network_count()
-        if saved_count == 0:
-            ui.show_message("Info", "No saved networks to delete")
-            return
-
-        confirm = ui.prompt_confirm(
-            f"Delete ALL {saved_count} saved network(s)? This cannot be undone.",
-            default=False,
-        )
-        if confirm is None:  # Home pressed
-            self._running = False
-            return
-        if not confirm:
-            return
-
-        # Shutdown current network if running
-        if self._network_manager.is_running:
-            await self._network_manager.shutdown()
-            self._pairing_manager = None
-
-        deleted = self._network_manager.delete_all_networks()
-        ui.show_message("Success", f"Deleted {deleted} saved network(s)")
-
-    async def _global_backup_menu(self) -> None:
-        """Display backup management menu showing all coordinators."""
-        # Filter to coordinators with saved networks (those can have backups)
-        coordinators_with_networks = [
-            coord
-            for coord in self._detected_coordinators
-            if self._network_manager.has_existing_network(coord)
-        ]
-
-        if not coordinators_with_networks:
-            ui.show_message("Info", "No saved networks with backups")
-            return
-
-        current_coord = self._network_manager.coordinator
-
-        while self._running:
-            # Build options with backup counts where available
-            options: list[str] = []
-            for coord in coordinators_with_networks:
-                name = self._network_manager.get_coordinator_name(coord.port)
-                display_name = name or coord.port
-
-                # Show backup count if this is the connected coordinator
-                if current_coord and coord.port == current_coord.port:
-                    backup_count = len(self._network_manager.get_backups())
-                    backup_label = "backup" if backup_count == 1 else "backups"
-                    options.append(f"{display_name} ({backup_count} {backup_label})")
-                else:
-                    options.append(f"{display_name} (saved)")
-
-            choice = ui.prompt_menu(
-                "◆ Manage Backups", options, show_back=True, show_home=True
-            )
-
-            if choice in (0, MENU_BACK):
-                return
-            if choice == MENU_HOME:
-                self._running = False
-                return
-
-            # Connect to selected coordinator and show its backups
-            selected = coordinators_with_networks[choice - 1]
-            if current_coord is None or selected.port != current_coord.port:
-                if not await self._ensure_network_started(selected):
-                    continue
-                current_coord = self._network_manager.coordinator
-
-            await self._backup_menu()
-
-    async def _ensure_network_started(self, coordinator: DetectedCoordinator) -> bool:
+    async def _ensure_network_started(
+        self, coordinator: DetectedCoordinator, silent: bool = False
+    ) -> bool:
         """Ensure the network is started, auto-starting if needed.
 
-        Returns True if network is running, False if start failed.
+        Args:
+            coordinator: The coordinator to start the network on.
+            silent: If True, use minimal UI (for auto-restore on startup).
+
+        Returns:
+            True if network is running, False if start failed.
         """
         # Check if we need to switch coordinators
         current_coord = self._network_manager.coordinator
@@ -328,23 +263,54 @@ class ZHACli:
                 devices = self._network_manager.get_devices()
                 status = "Restored" if has_existing else "Started"
                 spin.set_status(f"{status}! {len(devices)} device(s)")
-                await asyncio.sleep(0.5)  # Brief pause to show status
+                if not silent:
+                    await asyncio.sleep(0.5)  # Brief pause to show status
             except Exception as exc:
                 _LOGGER.exception("Network start failed")
-                ui.show_message("Error", f"Failed to start network: {exc}")
+                if not silent:
+                    ui.show_message("Error", f"Failed to start network: {exc}")
                 return False
 
         return True
 
-    def _signal_handler(self) -> None:
-        """Handle shutdown signals."""
-        self._running = False
+    async def _prompt_coordinator_name(self, coordinator: DetectedCoordinator) -> None:
+        """Prompt the user to name a newly detected coordinator."""
+        # Suggest a default name based on radio type
+        default_name = f"{coordinator.radio_type.pretty_name} Coordinator"
 
-    async def _cleanup(self) -> None:
-        """Clean up resources."""
-        await self._network_manager.shutdown()
-        # Clear screen on exit to leave terminal clean
-        ui.clear_screen()
+        name = ui.prompt_coordinator_name(
+            title="◆ Name Coordinator",
+            port=coordinator.port,
+            radio_type=coordinator.radio_type.pretty_name,
+            default=default_name,
+        )
+
+        if name:
+            self._network_manager.set_coordinator_name(coordinator.port, name)
+
+    async def _rename_coordinator(self) -> None:
+        """Rename the current coordinator."""
+        coordinator = self._network_manager.coordinator
+        if coordinator is None:
+            return
+
+        current_name = self._network_manager.get_coordinator_name(coordinator.port)
+        default_name = (
+            current_name or f"{coordinator.radio_type.pretty_name} Coordinator"
+        )
+
+        new_name = ui.prompt_coordinator_name(
+            title="◆ Rename Coordinator",
+            port=coordinator.port,
+            radio_type=coordinator.radio_type.pretty_name,
+            default=default_name,
+        )
+        if new_name:
+            self._network_manager.set_coordinator_name(coordinator.port, new_name)
+
+    # -------------------------------------------------------------------------
+    # Main Menu
+    # -------------------------------------------------------------------------
 
     async def _main_menu(self) -> None:
         """Display and handle the main menu (device management)."""
@@ -432,275 +398,9 @@ class ZHACli:
             spin.set_status("Network reset complete")
             await asyncio.sleep(0.5)
 
-    async def _backup_menu(self) -> None:
-        """Display backup management menu."""
-        while self._running:
-            backups = self._network_manager.get_backups()
-
-            options = []
-            for b in backups:
-                options.append(
-                    ui.format_backup_option(
-                        b["backup_time"], b["device_count"], b["is_complete"]
-                    )
-                )
-
-            # Add action at bottom
-            options.append("Update backup")
-
-            choice = ui.prompt_menu(
-                "◆ Backups", options, show_back=True, show_home=True
-            )
-
-            if choice in (0, MENU_BACK):
-                return
-            if choice == MENU_HOME:
-                self._running = False
-                return
-
-            if choice == len(backups) + 1:
-                # Create backup
-                try:
-                    async with ui.spinner("◆ Backups", status="Creating backup..."):
-                        await self._network_manager.create_backup()
-                except Exception as exc:
-                    ui.show_message("Error", f"Backup failed: {exc}")
-                    _LOGGER.exception("Backup failed")
-            else:
-                # Selected a backup - show detail menu
-                await self._backup_detail_menu(backups[choice - 1])
-
-    async def _backup_detail_menu(self, backup: dict) -> None:
-        """Show actions for a specific backup."""
-        options = ["Restore this backup", "Delete this backup"]
-
-        choice = ui.prompt_menu(
-            f"◆ Backup {backup['backup_time']}", options, show_back=True, show_home=True
-        )
-
-        if choice in (0, MENU_BACK):
-            return
-        if choice == MENU_HOME:
-            self._running = False
-            return
-
-        if choice == 1:
-            # Restore
-            confirm = ui.prompt_confirm(
-                "Restore network to this backup? Current state will be replaced.",
-                default=False,
-            )
-            if confirm is None:  # Home pressed
-                self._running = False
-                return
-            if confirm:
-                try:
-                    async with ui.spinner("◆ Backups", status="Restoring..."):
-                        await self._network_manager.restore_backup(backup["index"])
-                except Exception as exc:
-                    ui.show_message("Error", f"Restore failed: {exc}")
-                    _LOGGER.exception("Backup restore failed")
-        elif choice == 2:
-            # Delete
-            confirm = ui.prompt_confirm("Delete this backup?", default=False)
-            if confirm is None:  # Home pressed
-                self._running = False
-                return
-            if confirm:
-                try:
-                    await self._network_manager.delete_backup(backup["index"])
-                except Exception as exc:
-                    ui.show_message("Error", f"Delete failed: {exc}")
-                    _LOGGER.exception("Backup delete failed")
-
-    async def _rename_coordinator(self) -> None:
-        """Rename the current coordinator."""
-        coordinator = self._network_manager.coordinator
-        if coordinator is None:
-            return
-
-        current_name = self._network_manager.get_coordinator_name(coordinator.port)
-        default_name = (
-            current_name or f"{coordinator.radio_type.pretty_name} Coordinator"
-        )
-
-        new_name = ui.prompt_coordinator_name(
-            title="◆ Rename Coordinator",
-            port=coordinator.port,
-            radio_type=coordinator.radio_type.pretty_name,
-            default=default_name,
-        )
-        if new_name:
-            self._network_manager.set_coordinator_name(coordinator.port, new_name)
-
-    async def _pair_device(self) -> None:
-        """Enable pairing mode to add new devices."""
-        options = ["Start pairing (30 seconds)", "Start pairing (60 seconds)"]
-        choice = ui.prompt_menu(
-            "◆ Pair Device", options, show_back=True, show_home=True
-        )
-
-        if choice in (0, MENU_BACK):
-            return
-        if choice == MENU_HOME:
-            self._running = False
-            return
-
-        duration = 30 if choice == 1 else 60
-
-        if self._pairing_manager is None:
-            ui.show_message("Error", "Pairing manager not initialized")
-            return
-
-        pairing_manager = self._pairing_manager
-
-        # Track newly paired devices
-        new_devices: list[dict[str, Any]] = []
-
-        try:
-            async with ui.spinner("◆ Pairing Mode", "Waiting for device...") as spin:
-                await pairing_manager.enable_pairing(duration)
-
-                # Set up event handlers to update spinner status
-                def on_joined(event: Any) -> None:
-                    spin.set_status("Device joining...")
-
-                def on_initialized(event: Any) -> None:
-                    try:
-                        info = event.device_info
-                        device_name = info.model or info.manufacturer or "Device"
-                        spin.set_status(f"Found: {device_name}")
-                        # Only track truly new devices (not re-initialized existing ones)
-                        if getattr(event, "new_join", True):
-                            new_devices.append(
-                                {
-                                    "ieee": str(info.ieee),
-                                    "manufacturer": info.manufacturer,
-                                    "model": info.model,
-                                }
-                            )
-                    except Exception as exc:
-                        _LOGGER.exception("Error in on_initialized callback: %s", exc)
-
-                unsubscribe = pairing_manager.subscribe_to_events(
-                    on_joined=on_joined,
-                    on_initialized=on_initialized,
-                )
-
-                try:
-                    await asyncio.sleep(duration)
-                except asyncio.CancelledError:
-                    pass
-                finally:
-                    unsubscribe()
-                    await pairing_manager.disable_pairing()
-
-            # Prompt for names for each new device
-            for device in new_devices:
-                await self._prompt_device_name(device)
-
-        except Exception as exc:
-            ui.show_message("Error", f"Pairing failed: {exc}")
-            _LOGGER.exception("Pairing failed")
-
-    async def _prompt_device_name(self, device_info: dict[str, Any]) -> None:
-        """Prompt the user to name a newly paired device."""
-        ieee = device_info["ieee"]
-        manufacturer = device_info.get("manufacturer")
-        model = device_info.get("model")
-
-        # Suggest a default name based on model or manufacturer
-        default_name = model or manufacturer or "New Device"
-
-        name = ui.prompt_device_name(
-            title="◆ Name Device",
-            manufacturer=manufacturer,
-            model=model,
-            default=default_name,
-        )
-
-        if name:
-            self._network_manager.set_device_name(ieee, name)
-
-    async def _prompt_coordinator_name(self, coordinator: DetectedCoordinator) -> None:
-        """Prompt the user to name a newly detected coordinator."""
-        # Suggest a default name based on radio type
-        default_name = f"{coordinator.radio_type.pretty_name} Coordinator"
-
-        name = ui.prompt_coordinator_name(
-            title="◆ Name Coordinator",
-            port=coordinator.port,
-            radio_type=coordinator.radio_type.pretty_name,
-            default=default_name,
-        )
-
-        if name:
-            self._network_manager.set_coordinator_name(coordinator.port, name)
-
-    async def _wait_for_entities(
-        self, ieee: str, name: str, max_wait: float = 10.0
-    ) -> list | None:
-        """Wait for device entities to be available.
-
-        Newly paired devices may take time to initialize. This method polls
-        for entities up to max_wait seconds before giving up.
-
-        Returns:
-            List of controllable entities, or None if device not found/no entities.
-        """
-        poll_interval = 1.0
-        elapsed = 0.0
-
-        # Check once before showing spinner
-        fresh_info = self._network_manager.get_device_by_ieee(ieee)
-        if fresh_info is None:
-            ui.show_message("Error", "Device no longer available")
-            return None
-
-        device = fresh_info["device"]
-        entities = DeviceController.get_controllable_entities(device)
-        if entities:
-            return entities
-        # Check if device has monitorable entities (sensors)
-        sensors = DeviceController.get_monitorable_entities(device)
-        if sensors:
-            return (
-                entities  # Return empty controllable list; device menu handles sensors
-            )
-
-        # No entities yet - show animated spinner while polling
-        async with ui.spinner(f"◆ {name}"):
-            while elapsed < max_wait:
-                await asyncio.sleep(poll_interval)
-                elapsed += poll_interval
-
-                fresh_info = self._network_manager.get_device_by_ieee(ieee)
-                if fresh_info is None:
-                    return None  # Will show error after spinner exits
-
-                device = fresh_info["device"]
-                entities = DeviceController.get_controllable_entities(device)
-                if entities:
-                    return entities
-                # Check for monitorable entities (sensors)
-                sensors = DeviceController.get_monitorable_entities(device)
-                if sensors:
-                    return entities  # Return empty controllable list; device menu handles sensors
-
-        # Timed out - show diagnostic info
-        fresh_info = self._network_manager.get_device_by_ieee(ieee)
-        if fresh_info is None:
-            ui.show_message("Error", "Device no longer available")
-            return None
-
-        device = fresh_info["device"]
-        all_entities = DeviceController.get_all_entities(device)
-        if all_entities:
-            msg = f"Device has {len(all_entities)} entities but none are supported"
-        else:
-            msg = "No entities found after waiting. Device may need more time."
-        ui.show_message(name, msg)
-        return None
+    # -------------------------------------------------------------------------
+    # Device Operations
+    # -------------------------------------------------------------------------
 
     async def _control_device_direct(self, device_info: dict[str, Any]) -> None:
         """Control a specific device."""
@@ -837,6 +537,104 @@ class ZHACli:
                     ui.show_message("Error", f"Control failed: {exc}")
                     _LOGGER.exception("Control failed")
 
+    async def _wait_for_entities(
+        self, ieee: str, name: str, max_wait: float = 10.0
+    ) -> list | None:
+        """Wait for device entities to be available.
+
+        Newly paired devices may take time to initialize. This method polls
+        for entities up to max_wait seconds before giving up.
+
+        Returns:
+            List of controllable entities, or None if device not found/no entities.
+        """
+        poll_interval = 1.0
+        elapsed = 0.0
+
+        # Check once before showing spinner
+        fresh_info = self._network_manager.get_device_by_ieee(ieee)
+        if fresh_info is None:
+            ui.show_message("Error", "Device no longer available")
+            return None
+
+        device = fresh_info["device"]
+        entities = DeviceController.get_controllable_entities(device)
+        if entities:
+            return entities
+        # Check if device has monitorable entities (sensors)
+        sensors = DeviceController.get_monitorable_entities(device)
+        if sensors:
+            return (
+                entities  # Return empty controllable list; device menu handles sensors
+            )
+
+        # No entities yet - show animated spinner while polling
+        async with ui.spinner(f"◆ {name}"):
+            while elapsed < max_wait:
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+
+                fresh_info = self._network_manager.get_device_by_ieee(ieee)
+                if fresh_info is None:
+                    return None  # Will show error after spinner exits
+
+                device = fresh_info["device"]
+                entities = DeviceController.get_controllable_entities(device)
+                if entities:
+                    return entities
+                # Check for monitorable entities (sensors)
+                sensors = DeviceController.get_monitorable_entities(device)
+                if sensors:
+                    return entities  # Return empty controllable list; device menu handles sensors
+
+        # Timed out - show diagnostic info
+        fresh_info = self._network_manager.get_device_by_ieee(ieee)
+        if fresh_info is None:
+            ui.show_message("Error", "Device no longer available")
+            return None
+
+        device = fresh_info["device"]
+        all_entities = DeviceController.get_all_entities(device)
+        if all_entities:
+            msg = f"Device has {len(all_entities)} entities but none are supported"
+        else:
+            msg = "No entities found after waiting. Device may need more time."
+        ui.show_message(name, msg)
+        return None
+
+    async def _view_sensors(self, device: Any, device_name: str) -> None:
+        """View sensor values with event-driven live updates."""
+        sensors = DeviceController.get_monitorable_entities(device)
+
+        if not sensors:
+            ui.show_message(f"◆ {device_name}", "No sensors available")
+            return
+
+        # Refresh on entry
+        async with ui.spinner(f"◆ {device_name}", status="Reading sensors..."):
+            for sensor in sensors:
+                await DeviceController.refresh_entity(sensor)
+
+        while self._running:
+            menu = ui.LiveSensorMenu(
+                f"◆ {device_name} Sensors",
+                sensors,
+                DeviceController.get_display_name,
+                DeviceController.format_entity_state,
+            )
+            choice = await menu.run()
+
+            if choice in (0, MENU_BACK):
+                return
+            if choice == MENU_HOME:
+                self._running = False
+                return
+            if choice == len(sensors) + 1:
+                # Manual refresh
+                async with ui.spinner(f"◆ {device_name}", status="Refreshing..."):
+                    for sensor in sensors:
+                        await DeviceController.refresh_entity(sensor)
+
     async def _remove_device(self, ieee: str, name: str) -> bool:
         """Remove a device from the network.
 
@@ -873,38 +671,279 @@ class ZHACli:
 
         return True
 
-    async def _view_sensors(self, device: Any, device_name: str) -> None:
-        """View sensor values with event-driven live updates."""
-        sensors = DeviceController.get_monitorable_entities(device)
+    # -------------------------------------------------------------------------
+    # Pairing
+    # -------------------------------------------------------------------------
 
-        if not sensors:
-            ui.show_message(f"◆ {device_name}", "No sensors available")
+    async def _pair_device(self) -> None:
+        """Enable pairing mode to add new devices."""
+        options = ["Start pairing (30 seconds)", "Start pairing (60 seconds)"]
+        choice = ui.prompt_menu(
+            "◆ Pair Device", options, show_back=True, show_home=True
+        )
+
+        if choice in (0, MENU_BACK):
+            return
+        if choice == MENU_HOME:
+            self._running = False
             return
 
-        # Refresh on entry
-        async with ui.spinner(f"◆ {device_name}", status="Reading sensors..."):
-            for sensor in sensors:
-                await DeviceController.refresh_entity(sensor)
+        duration = 30 if choice == 1 else 60
+
+        if self._pairing_manager is None:
+            ui.show_message("Error", "Pairing manager not initialized")
+            return
+
+        pairing_manager = self._pairing_manager
+
+        # Track newly paired devices
+        new_devices: list[dict[str, Any]] = []
+
+        try:
+            async with ui.spinner("◆ Pairing Mode", "Waiting for device...") as spin:
+                await pairing_manager.enable_pairing(duration)
+
+                # Set up event handlers to update spinner status
+                def on_joined(event: Any) -> None:
+                    spin.set_status("Device joining...")
+
+                def on_initialized(event: Any) -> None:
+                    try:
+                        info = event.device_info
+                        device_name = info.model or info.manufacturer or "Device"
+                        spin.set_status(f"Found: {device_name}")
+                        # Only track truly new devices (not re-initialized existing ones)
+                        if getattr(event, "new_join", True):
+                            new_devices.append(
+                                {
+                                    "ieee": str(info.ieee),
+                                    "manufacturer": info.manufacturer,
+                                    "model": info.model,
+                                }
+                            )
+                    except Exception as exc:
+                        _LOGGER.exception("Error in on_initialized callback: %s", exc)
+
+                unsubscribe = pairing_manager.subscribe_to_events(
+                    on_joined=on_joined,
+                    on_initialized=on_initialized,
+                )
+
+                try:
+                    await asyncio.sleep(duration)
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    unsubscribe()
+                    await pairing_manager.disable_pairing()
+
+            # Prompt for names for each new device
+            for device in new_devices:
+                await self._prompt_device_name(device)
+
+        except Exception as exc:
+            ui.show_message("Error", f"Pairing failed: {exc}")
+            _LOGGER.exception("Pairing failed")
+
+    async def _prompt_device_name(self, device_info: dict[str, Any]) -> None:
+        """Prompt the user to name a newly paired device."""
+        ieee = device_info["ieee"]
+        manufacturer = device_info.get("manufacturer")
+        model = device_info.get("model")
+
+        # Suggest a default name based on model or manufacturer
+        default_name = model or manufacturer or "New Device"
+
+        name = ui.prompt_device_name(
+            title="◆ Name Device",
+            manufacturer=manufacturer,
+            model=model,
+            default=default_name,
+        )
+
+        if name:
+            self._network_manager.set_device_name(ieee, name)
+
+    # -------------------------------------------------------------------------
+    # Backup Operations
+    # -------------------------------------------------------------------------
+
+    async def _global_backup_menu(self) -> None:
+        """Display backup management menu showing all coordinators."""
+        # Filter to coordinators with saved networks (those can have backups)
+        coordinators_with_networks = [
+            coord
+            for coord in self._detected_coordinators
+            if self._network_manager.has_existing_network(coord)
+        ]
+
+        if not coordinators_with_networks:
+            ui.show_message("Info", "No saved networks with backups")
+            return
+
+        current_coord = self._network_manager.coordinator
 
         while self._running:
-            menu = ui.LiveSensorMenu(
-                f"◆ {device_name} Sensors",
-                sensors,
-                DeviceController.get_display_name,
-                DeviceController.format_entity_state,
+            # Build options with backup counts where available
+            options: list[str] = []
+            for coord in coordinators_with_networks:
+                name = self._network_manager.get_coordinator_name(coord.port)
+                display_name = name or coord.port
+
+                # Show backup count if this is the connected coordinator
+                if current_coord and coord.port == current_coord.port:
+                    backup_count = len(self._network_manager.get_backups())
+                    backup_label = "backup" if backup_count == 1 else "backups"
+                    options.append(f"{display_name} ({backup_count} {backup_label})")
+                else:
+                    options.append(f"{display_name} (saved)")
+
+            choice = ui.prompt_menu(
+                "◆ Manage Backups", options, show_back=True, show_home=True
             )
-            choice = await menu.run()
 
             if choice in (0, MENU_BACK):
                 return
             if choice == MENU_HOME:
                 self._running = False
                 return
-            if choice == len(sensors) + 1:
-                # Manual refresh
-                async with ui.spinner(f"◆ {device_name}", status="Refreshing..."):
-                    for sensor in sensors:
-                        await DeviceController.refresh_entity(sensor)
+
+            # Connect to selected coordinator and show its backups
+            selected = coordinators_with_networks[choice - 1]
+            if current_coord is None or selected.port != current_coord.port:
+                if not await self._ensure_network_started(selected):
+                    continue
+                current_coord = self._network_manager.coordinator
+
+            await self._backup_menu()
+
+    async def _backup_menu(self) -> None:
+        """Display backup management menu."""
+        while self._running:
+            backups = self._network_manager.get_backups()
+
+            options = []
+            for b in backups:
+                options.append(
+                    ui.format_backup_option(
+                        b["backup_time"], b["device_count"], b["is_complete"]
+                    )
+                )
+
+            # Add action at bottom
+            options.append("Update backup")
+
+            choice = ui.prompt_menu(
+                "◆ Backups", options, show_back=True, show_home=True
+            )
+
+            if choice in (0, MENU_BACK):
+                return
+            if choice == MENU_HOME:
+                self._running = False
+                return
+
+            if choice == len(backups) + 1:
+                # Create backup
+                try:
+                    async with ui.spinner("◆ Backups", status="Creating backup..."):
+                        await self._network_manager.create_backup()
+                except Exception as exc:
+                    ui.show_message("Error", f"Backup failed: {exc}")
+                    _LOGGER.exception("Backup failed")
+            else:
+                # Selected a backup - show detail menu
+                await self._backup_detail_menu(backups[choice - 1])
+
+    async def _backup_detail_menu(self, backup: dict) -> None:
+        """Show actions for a specific backup."""
+        options = ["Restore this backup", "Delete this backup"]
+
+        choice = ui.prompt_menu(
+            f"◆ Backup {backup['backup_time']}", options, show_back=True, show_home=True
+        )
+
+        if choice in (0, MENU_BACK):
+            return
+        if choice == MENU_HOME:
+            self._running = False
+            return
+
+        if choice == 1:
+            # Restore
+            confirm = ui.prompt_confirm(
+                "Restore network to this backup? Current state will be replaced.",
+                default=False,
+            )
+            if confirm is None:  # Home pressed
+                self._running = False
+                return
+            if confirm:
+                try:
+                    async with ui.spinner("◆ Backups", status="Restoring..."):
+                        await self._network_manager.restore_backup(backup["index"])
+                except Exception as exc:
+                    ui.show_message("Error", f"Restore failed: {exc}")
+                    _LOGGER.exception("Backup restore failed")
+        elif choice == 2:
+            # Delete
+            confirm = ui.prompt_confirm("Delete this backup?", default=False)
+            if confirm is None:  # Home pressed
+                self._running = False
+                return
+            if confirm:
+                try:
+                    await self._network_manager.delete_backup(backup["index"])
+                except Exception as exc:
+                    ui.show_message("Error", f"Delete failed: {exc}")
+                    _LOGGER.exception("Backup delete failed")
+
+    # -------------------------------------------------------------------------
+    # Settings
+    # -------------------------------------------------------------------------
+
+    async def _settings_menu(self) -> None:
+        """Display settings menu."""
+        saved_count = self._network_manager.get_saved_network_count()
+
+        options = [
+            f"Delete all saved networks ({saved_count} saved)",
+        ]
+
+        choice = ui.prompt_menu("◆ Settings", options, show_back=True, show_home=True)
+
+        if choice in (0, MENU_BACK):
+            return
+        elif choice == MENU_HOME:
+            self._running = False
+            return
+        elif choice == 1:
+            await self._delete_all_networks()
+
+    async def _delete_all_networks(self) -> None:
+        """Delete all saved network databases."""
+        saved_count = self._network_manager.get_saved_network_count()
+        if saved_count == 0:
+            ui.show_message("Info", "No saved networks to delete")
+            return
+
+        confirm = ui.prompt_confirm(
+            f"Delete ALL {saved_count} saved network(s)? This cannot be undone.",
+            default=False,
+        )
+        if confirm is None:  # Home pressed
+            self._running = False
+            return
+        if not confirm:
+            return
+
+        # Shutdown current network if running
+        if self._network_manager.is_running:
+            await self._network_manager.shutdown()
+            self._pairing_manager = None
+
+        deleted = self._network_manager.delete_all_networks()
+        ui.show_message("Success", f"Deleted {deleted} saved network(s)")
 
 
 class ImmediateFileHandler(logging.FileHandler):
