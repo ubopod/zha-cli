@@ -204,15 +204,45 @@ class DeviceController:
         return str(state)
 
     @staticmethod
-    async def refresh_entity(entity: PlatformEntity) -> None:
-        """Refresh entity state from device.
+    async def refresh_entity(entity: PlatformEntity) -> bool:
+        """Refresh entity state from device via ZCL Read Attributes.
 
         Args:
             entity: The entity to refresh.
 
+        Returns:
+            True if refresh succeeded, False if it failed (e.g., timeout).
         """
+        # Get the primary attribute and cluster handler for sensor entities
+        attribute_name = getattr(entity, "_attribute_name", None)
+        cluster_handler = getattr(entity, "_cluster_handler", None)
+
+        if attribute_name and cluster_handler:
+            try:
+                await cluster_handler.get_attribute_value(
+                    attribute_name, from_cache=False
+                )
+                return True
+            except TimeoutError:
+                _LOGGER.debug(
+                    "Timeout reading %s from %s (battery device?)",
+                    attribute_name,
+                    entity.unique_id,
+                )
+                return False
+            except Exception as ex:
+                _LOGGER.debug(
+                    "Failed to read %s from %s: %s",
+                    attribute_name,
+                    entity.unique_id,
+                    ex,
+                )
+                return False
+
+        # Fallback for entities without _attribute_name
         if hasattr(entity, "async_update"):
             await entity.async_update()
+        return True
 
     @staticmethod
     def get_display_name(entity: PlatformEntity) -> str:
