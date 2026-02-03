@@ -443,8 +443,9 @@ class ZHACli:
             if all_entities:
                 try:
                     async with ui.spinner(f"◆ {name}", status="Reading device..."):
-                        for entity in all_entities:
-                            await DeviceController.refresh_entity(entity)
+                        await asyncio.gather(
+                            *[DeviceController.refresh_entity(e) for e in all_entities]
+                        )
                 except Exception as exc:
                     _LOGGER.warning("Failed to refresh entities: %s", exc)
 
@@ -619,8 +620,9 @@ class ZHACli:
 
         # Refresh on entry
         async with ui.spinner(f"◆ {device_name}", status="Reading sensors..."):
-            for sensor in sensors:
-                await DeviceController.refresh_entity(sensor)
+            await asyncio.gather(
+                *[DeviceController.refresh_entity(s) for s in sensors]
+            )
 
         while self._running:
             menu = ui.LiveSensorMenu(
@@ -639,8 +641,9 @@ class ZHACli:
             if choice == len(sensors) + 1:
                 # Manual refresh
                 async with ui.spinner(f"◆ {device_name}", status="Refreshing..."):
-                    for sensor in sensors:
-                        await DeviceController.refresh_entity(sensor)
+                    await asyncio.gather(
+                        *[DeviceController.refresh_entity(s) for s in sensors]
+                    )
 
     async def _remove_device(self, ieee: str, name: str) -> bool:
         """Remove a device from the network.
