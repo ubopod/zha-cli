@@ -642,6 +642,7 @@ class LiveSensorMenu:
                     show_back=True,
                     show_home=True,
                 )
+                console.print("  [dim]Enter choice:[/dim] ", end="", highlight=False)
             await asyncio.sleep(0.05)  # 50ms check interval
 
     async def _input_loop(self) -> None:
