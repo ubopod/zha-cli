@@ -629,30 +629,37 @@ class LiveSensorMenu:
         options.append("Refresh readings")
         return options
 
-    async def _render_loop(self) -> None:
-        """Render when _needs_render is True."""
+    def _render(self) -> None:
+        """Render the menu with current state."""
+        options = self._build_options()
+        _render_menu_box(
+            self.title,
+            options,
+            self._scroll_offset,
+            show_back=True,
+            show_home=True,
+        )
+        console.print("  [dim]Enter choice:[/dim] ", end="", highlight=False)
+
+    async def _main_loop(self) -> None:
+        """Main loop handling both rendering and input."""
         while self._running:
             if self._needs_render:
                 self._needs_render = False
-                options = self._build_options()
-                _render_menu_box(
-                    self.title,
-                    options,
-                    self._scroll_offset,
-                    show_back=True,
-                    show_home=True,
-                )
-                console.print("  [dim]Enter choice:[/dim] ", end="", highlight=False)
-            await asyncio.sleep(0.05)  # 50ms check interval
+                self._render()
 
-    async def _input_loop(self) -> None:
-        """Non-blocking input handling."""
-        while self._running:
-            # Use select() for non-blocking stdin
+            # Check for input with short timeout to allow re-renders on state change
             readable, _, _ = select.select([sys.stdin], [], [], 0.1)
             if readable:
-                response = sys.stdin.readline().strip().lower()
-                await self._handle_input(response)
+                try:
+                    response = sys.stdin.readline().strip().lower()
+                    if response:  # Only process non-empty input
+                        await self._handle_input(response)
+                except EOFError:
+                    self._running = False
+
+            # Yield to allow other async tasks (like event handlers)
+            await asyncio.sleep(0)
 
     async def _handle_input(self, response: str) -> None:
         """Process user input."""
@@ -705,18 +712,10 @@ class LiveSensorMenu:
         self._running = True
         self._needs_render = True
 
-        render_task = asyncio.create_task(self._render_loop())
-        input_task = asyncio.create_task(self._input_loop())
-
         try:
-            await input_task
+            await self._main_loop()
         finally:
             self._running = False
-            render_task.cancel()
-            try:
-                await render_task
-            except asyncio.CancelledError:
-                pass
             # Unsubscribe from all events
             for unsub in self._unsubscribers:
                 _LOGGER.debug("%sSENSOR EVENT: unsubscribing listener%s", BOLD, RESET)
